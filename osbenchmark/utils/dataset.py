@@ -24,6 +24,7 @@ class Context(Enum):
     INDEX = 1
     QUERY = 2
     NEIGHBORS = 3
+    PARENTS = 6
     ATTRIBUTES = 7
 
 
@@ -141,6 +142,9 @@ class HDF5DataSet(DataSet):
 
         if context == Context.QUERY:
             return "test"
+
+        if context == Context.PARENTS:
+            return "parents" # used in nested benchmarks to get the parent document id associated with each vector.
 
         if context == Context.ATTRIBUTES:
             return "attributes"
