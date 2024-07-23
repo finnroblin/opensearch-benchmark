@@ -1094,9 +1094,14 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         if self.PARAMS_NAME_QUERY in body_params:
             self.logger.warning(
                 "[%s] param from body will be replaced with vector search query.", self.PARAMS_NAME_QUERY)
+
+        self.logger.info("Here, we have query_params: %s ", self.query_params)
         efficient_filter=self.query_params.get(self.PARAMS_NAME_FILTER)
         # override query params with vector search query
         body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_query_body(vector, efficient_filter)
+
+        self.logger.info("Note: returning as vector search query: %s", body_params)
+
         self.query_params.update({self.PARAMS_NAME_BODY: body_params})
 
     def partition(self, partition_index, total_partitions):
