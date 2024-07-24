@@ -3120,6 +3120,74 @@ class BulkVectorsFromDataSetParamSourceTestCase(TestCase):
                 continue
             self.assertTrue(expected_id_field in req_body)
 
+class VectorsAttributeCase(TestCase):
+    DEFAULT_INDEX_NAME = "test-partition-index"
+    DEFAULT_VECTOR_FIELD_NAME = "test-vector-field"
+    DEFAULT_CONTEXT = Context.INDEX
+    DEFAULT_TYPE = HDF5DataSet.FORMAT_NAME
+    DEFAULT_NUM_VECTORS = 10
+    DEFAULT_DIMENSION = 10
+    DEFAULT_RANDOM_STRING_LENGTH = 8
+    DEFAULT_ID_FIELD_NAME = "_id"
+
+    def setUp(self) -> None:
+        self.data_set_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.data_set_dir)
+
+    def test_params_default(
+        self
+    ):
+        num_vectors = 49
+        bulk_size = 10
+        data_set_path = create_data_set(
+            num_vectors,
+            self.DEFAULT_DIMENSION,
+            self.DEFAULT_TYPE,
+            Context.INDEX,
+            self.data_set_dir
+        )
+        parent_data_set_path = create_parent_data_set(
+            num_vectors,
+            self.DEFAULT_DIMENSION,
+            self.DEFAULT_TYPE,
+            Context.ATTRIBUTES,
+            self.data_set_dir,
+        )
+
+        test_param_source_params = {
+            "index": self.DEFAULT_INDEX_NAME,
+            "field": self.DEFAULT_VECTOR_FIELD_NAME,
+            "data_set_format": self.DEFAULT_TYPE,
+            "data_set_path": data_set_path,
+            "bulk_size": bulk_size,
+            "id-field-name": self.DEFAULT_ID_FIELD_NAME,
+            "has_attributes": 1
+        }
+        bulk_param_source = BulkVectorsFromDataSetParamSource(
+            workload.Workload(name="unit-test"), test_param_source_params
+        )
+        bulk_param_source.parent_data_set_path = parent_data_set_path
+        bulk_param_source_partition = bulk_param_source.partition(0, 1)
+        # Check each payload returned
+        vectors_consumed = 0
+        while vectors_consumed < num_vectors:
+            expected_num_vectors = min(num_vectors - vectors_consumed, bulk_size)
+            actual_params = bulk_param_source_partition.params()
+            self._check_params(
+                actual_params,
+                self.DEFAULT_INDEX_NAME,
+                self.DEFAULT_VECTOR_FIELD_NAME,
+                self.DEFAULT_DIMENSION,
+                expected_num_vectors,
+                self.DEFAULT_ID_FIELD_NAME,
+            )
+            vectors_consumed += expected_num_vectors
+
+        # Assert last call creates stop iteration
+        with self.assertRaises(StopIteration):
+            bulk_param_source_partition.params()
 
 class VectorsNestedCase(TestCase):
     DEFAULT_INDEX_NAME = "test-partition-index"

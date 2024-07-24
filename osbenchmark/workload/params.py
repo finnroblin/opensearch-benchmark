@@ -1213,6 +1213,7 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
         self.id_field_name: str = parse_string_parameter(
             self.PARAMS_NAME_ID_FIELD_NAME, params, self.DEFAULT_ID_FIELD_NAME
         )
+        self.has_attributes = parse_int_parameter("has_attributes", params, 0)
 
         self.action_buffer = None
         self.num_nested_vectors = 10
@@ -1244,7 +1245,40 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
             )
             partition.parent_data_set.seek(partition.offset)
 
+        if self.has_attributes:
+            partition.attributes_data_set = get_data_set(
+                self.parent_data_set_format, self.parent_data_set_path, Context.ATTRIBUTES
+            )
+            partition.attributes_data_set.seek(partition.offset)
+
         return partition
+    
+    def bulk_transform_add_attributes(self, partition: np.ndarray, action, attributes: np.ndarray) ->   List[Dict[str, Any]]:
+        """attributes is a (partition_len x 3) matrix. """
+        actions = []
+
+        _ = [
+                actions.extend([action(self.id_field_name, i + self.current), None])
+                for i in range(len(partition))
+            ]
+        bulk_contents = []
+
+        add_id_field_to_body = self.id_field_name != self.DEFAULT_ID_FIELD_NAME
+        for vec, attribute_list, identifier in zip(
+            partition.tolist(), attributes.tolist(), range(self.current, self.current + len(partition))
+        ):
+            row = {self.field_name: vec}
+            for idx, attribute_name, attribute_type in zip(range(3), ["taste", "color", "age"], [str, str, int]):
+                row.update({attribute_name : attribute_type(attribute_list[idx])})
+            if add_id_field_to_body:
+                row.update({self.id_field_name: identifier})
+            bulk_contents.append(row)
+
+        actions[1::2] = bulk_contents
+
+        self.logger.info("Actions: %s", actions)
+        return actions
+
 
     def bulk_transform_non_nested(self, partition: np.ndarray, action) -> List[Dict[str, Any]]:
         """
@@ -1274,7 +1308,7 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
 
 
     def bulk_transform(
-        self, partition: np.ndarray, action, parents_ids: Optional[np.ndarray]
+        self, partition: np.ndarray, action, parents_ids: Optional[np.ndarray], attributes: Optional[np.ndarray] # maybe attributes is a (partition_len x 3) matrix.  
     ) -> List[Dict[str, Any]]:
         """Partitions and transforms a list of vectors into OpenSearch's bulk
         injection format.
@@ -1286,9 +1320,12 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
             An array of transformed vectors in bulk format.
         """
 
-        if not self.is_nested:
+        if not self.is_nested and not self.has_attributes:
             return self.bulk_transform_non_nested(partition, action)
 
+        # TODO: Assumption: we won't add attributes if we're also doing a nested query. 
+        if self.has_attributes:
+            return self.bulk_transform_add_attributes(partition, action, attributes)
         actions = []
 
         outer_field_name, inner_field_name = self.get_split_fields()
@@ -1371,7 +1408,12 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
         else:
             parent_ids = None
 
-        body = self.bulk_transform(partition, action, parent_ids)
+        if self.has_attributes:
+            attributes = self.attributes_data_set.read(bulk_size)
+        else:
+            attributes = None
+
+        body = self.bulk_transform(partition, action, parent_ids, attributes)
         size = len(body) // 2
 
         if not self.is_nested:
