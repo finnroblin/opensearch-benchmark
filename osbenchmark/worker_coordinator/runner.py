@@ -1304,6 +1304,7 @@ class Query(Runner):
                     "took": took
                 })
             response_json = json.loads(response.getvalue())
+            self.logger.info("Response json %s", response_json)
             if _is_empty_search_results(response_json):
                 self.logger.info("Vector search query returned no results.")
                 return result

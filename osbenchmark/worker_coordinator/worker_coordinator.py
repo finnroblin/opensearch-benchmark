@@ -2003,6 +2003,8 @@ class ScheduleHandle:
                     # does not contribute at all to completion. Hence, we cannot define completion.
                     percent_completed = self.params.percent_completed if param_source_knows_progress else None
                     #current_params = await self.loop.run_in_executor(self.io_pool_exc, self.params.params)
+                    # logger = logging.getLogger(__name__)
+                    # logger.info("Here are the params from the scheduler: %s", self.params.params()) 
                     yield (next_scheduled, self.task_progress_control.sample_type, percent_completed, self.runner,
                            self.params.params())
                     self.task_progress_control.next()
@@ -2013,6 +2015,8 @@ class ScheduleHandle:
             while not self.task_progress_control.completed:
                 try:
                     next_scheduled = self.sched.next(next_scheduled)
+                    # logger = logging.getLogger(__name__)
+                    # logger.info("Here are the params from the scheduler: %s", self.params.params()) 
                     #current_params = await self.loop.run_in_executor(self.io_pool_exc, self.params.params)
                     yield (next_scheduled,
                            self.task_progress_control.sample_type,

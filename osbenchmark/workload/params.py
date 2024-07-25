@@ -1213,7 +1213,7 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
         self.id_field_name: str = parse_string_parameter(
             self.PARAMS_NAME_ID_FIELD_NAME, params, self.DEFAULT_ID_FIELD_NAME
         )
-        self.has_attributes = parse_int_parameter("has_attributes", params, 0)
+        self.has_attributes : bool = parse_int_parameter("has_attributes", params, 0)
 
         self.action_buffer = None
         self.num_nested_vectors = 10
@@ -1246,9 +1246,12 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
             partition.parent_data_set.seek(partition.offset)
 
         if self.has_attributes:
+            self.logger.info("Trying to read attributes dataset")
             partition.attributes_data_set = get_data_set(
                 self.parent_data_set_format, self.parent_data_set_path, Context.ATTRIBUTES
             )
+            # self.logger.info("Attributes dataset: %s", partition.attributes_data_set)
+            # self.logger.info("Here is the first entry: %s", partition.attributes_data_set.read(0))
             partition.attributes_data_set.seek(partition.offset)
 
         return partition
@@ -1275,8 +1278,8 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
             bulk_contents.append(row)
 
         actions[1::2] = bulk_contents
-
-        self.logger.info("Actions: %s", actions)
+        self.logger.info("With Attributes called.")
+        # self.logger.info("Actions: %s", actions)
         return actions
 
 

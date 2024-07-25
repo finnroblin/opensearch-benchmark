@@ -200,6 +200,26 @@ def create_parent_ids(num_vectors: int, group_size: int = 10) -> np.ndarray:
     return parent_ids
 
 
+def create_attributes(num_vectors: int) -> np.ndarray:
+    rng = np.random.default_rng()
+    
+    # Random strings and None
+    strings = ['str1', 'str2', 'str3', None]
+    
+    # First column: random choice from strings
+    col1 = rng.choice(strings, num_vectors).astype('S10')
+    
+    # Second column: random choice from strings
+    col2 = rng.choice(strings, num_vectors).astype('S10')
+    
+    # Third column: random numbers between 0 and 100
+    col3 = rng.integers(0, 101, num_vectors).astype('S10')
+    
+    # Combine columns into a single array
+    random_vector = np.column_stack((col1, col2, col3))
+    
+    return random_vector
+
 def create_random_2d_array(num_vectors: int, dimension: int) -> np.ndarray:
     rng = np.random.default_rng()
     return rng.random(size=(num_vectors, dimension), dtype=np.float32)
@@ -272,6 +292,32 @@ def create_parent_data_set(
 
     return data_set_path
 
+def create_attributes_data_set(
+        num_vectors: int,
+        dimension: int,
+        extension: str,
+        data_set_context: Context,
+        data_set_dir,
+        file_path: str = None
+) -> str:
+    if file_path:
+        data_set_path = file_path
+    else:
+        file_name_base = ''.join(random.choice(string.ascii_letters) for _ in
+                                 range(DEFAULT_RANDOM_STRING_LENGTH))
+        data_set_file_name = "{}.{}".format(file_name_base, extension)
+        data_set_path = os.path.join(data_set_dir, data_set_file_name)
+    context = DataSetBuildContext(
+        data_set_context,
+        create_attributes(num_vectors),
+        data_set_path)
+
+    if extension == HDF5DataSet.FORMAT_NAME:
+        HDF5Builder().add_data_set_build_context(context).build()
+    else:
+        BigANNVectorBuilder().add_data_set_build_context(context).build()
+
+    return data_set_path
 
 
 def create_ground_truth(

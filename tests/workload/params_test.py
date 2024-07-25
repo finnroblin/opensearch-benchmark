@@ -37,7 +37,7 @@ from osbenchmark.utils.parse import ConfigurationError
 from osbenchmark.workload import params, workload
 from osbenchmark.workload.params import VectorDataSetPartitionParamSource, VectorSearchPartitionParamSource, \
     BulkVectorsFromDataSetParamSource
-from tests.utils.dataset_helper import create_data_set, create_parent_data_set
+from tests.utils.dataset_helper import create_data_set, create_parent_data_set, create_attributes_data_set
 from tests.utils.dataset_test import DEFAULT_NUM_VECTORS
 
 
@@ -3129,6 +3129,7 @@ class VectorsAttributeCase(TestCase):
     DEFAULT_DIMENSION = 10
     DEFAULT_RANDOM_STRING_LENGTH = 8
     DEFAULT_ID_FIELD_NAME = "_id"
+    ATTRIBUTES_LIST = ['taste', 'color', 'age']
 
     def setUp(self) -> None:
         self.data_set_dir = tempfile.mkdtemp()
@@ -3148,13 +3149,13 @@ class VectorsAttributeCase(TestCase):
             Context.INDEX,
             self.data_set_dir
         )
-        parent_data_set_path = create_parent_data_set(
+        parent_data_set_path = create_attributes_data_set(
             num_vectors,
             self.DEFAULT_DIMENSION,
             self.DEFAULT_TYPE,
             Context.ATTRIBUTES,
             self.data_set_dir,
-        )
+        ) # TODO this is a little bit messed up. 
 
         test_param_source_params = {
             "index": self.DEFAULT_INDEX_NAME,
@@ -3175,7 +3176,7 @@ class VectorsAttributeCase(TestCase):
         while vectors_consumed < num_vectors:
             expected_num_vectors = min(num_vectors - vectors_consumed, bulk_size)
             actual_params = bulk_param_source_partition.params()
-            self._check_params(
+            self._check_params_attributes(
                 actual_params,
                 self.DEFAULT_INDEX_NAME,
                 self.DEFAULT_VECTOR_FIELD_NAME,
@@ -3188,6 +3189,44 @@ class VectorsAttributeCase(TestCase):
         # Assert last call creates stop iteration
         with self.assertRaises(StopIteration):
             bulk_param_source_partition.params()
+    def _check_params_attributes(
+            self,
+        actual_params: dict,
+        expected_index: str,
+        expected_vector_field: str,
+        expected_dimension: int,
+        expected_num_vectors_in_payload: int,
+        expected_id_field: str,
+    ):
+        size = actual_params.get("size")
+        self.assertEqual(size, expected_num_vectors_in_payload)
+        body = actual_params.get("body")
+        self.assertIsInstance(body, list)
+        self.assertEqual(len(body) // 2, expected_num_vectors_in_payload)
+
+        # Bulk payload has 2 parts: first one is the header and the second one
+        # is the body. The header will have the index name and the body will
+        # have the vector
+        for header, req_body in zip(*[iter(body)] * 2):
+            index = header.get("index")
+            self.assertIsInstance(index, dict)
+
+            index_name = index.get("_index")
+            self.assertEqual(index_name, expected_index)
+
+            vector = req_body.get(expected_vector_field)
+            self.assertIsInstance(vector, list)
+            self.assertEqual(len(vector), expected_dimension)
+
+            for attribute in self.ATTRIBUTES_LIST:
+                self.assertTrue(attribute in req_body)
+            
+            if expected_id_field in index:
+                self.assertEqual(self.DEFAULT_ID_FIELD_NAME, expected_id_field)
+                self.assertFalse(expected_id_field in req_body)
+                continue
+            self.assertTrue(expected_id_field in req_body)
+
 
 class VectorsNestedCase(TestCase):
     DEFAULT_INDEX_NAME = "test-partition-index"
