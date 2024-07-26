@@ -1045,6 +1045,8 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
     PARAMS_NAME_SIZE = "size"
     PARAMS_NAME_QUERY = "query"
     PARAMS_NAME_FILTER = "filter"
+    PARAMS_NAME_FILTER_TYPE = "filter_type"
+    PARAMS_NAME_FILTER_BODY = "filter_body"
     PARAMS_NAME_REPETITIONS = "repetitions"
     PARAMS_NAME_NEIGHBORS_DATA_SET_FORMAT = "neighbors_data_set_format"
     PARAMS_NAME_NEIGHBORS_DATA_SET_PATH = "neighbors_data_set_path"
@@ -1076,9 +1078,21 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
             self.PARAMS_NAME_OPERATION_TYPE: operation_type,
             self.PARAMS_NAME_ID_FIELD_NAME: params.get(self.PARAMS_NAME_ID_FIELD_NAME),
         })
+
+
         if self.PARAMS_NAME_FILTER in params:
             self.query_params.update({
                 self.PARAMS_NAME_FILTER:  params.get(self.PARAMS_NAME_FILTER)
+            })
+        
+        if self.PARAMS_NAME_FILTER_TYPE in params:
+            self.query_params.update({
+                self.PARAMS_NAME_FILTER_TYPE:  params.get(self.PARAMS_NAME_FILTER_TYPE)
+            })
+
+        if self.PARAMS_NAME_FILTER_BODY in params:
+            self.query_params.update({
+                self.PARAMS_NAME_FILTER_BODY:  params.get(self.PARAMS_NAME_FILTER_BODY)
             })
         # if neighbors data set is defined as corpus, extract corresponding corpus from workload
         # and add it to corpora list
@@ -1111,8 +1125,18 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
 
         self.logger.info("Here, we have query_params: %s ", self.query_params)
         efficient_filter=self.query_params.get(self.PARAMS_NAME_FILTER)
+        self.logger.info("Efficient filter: %s", efficient_filter)
+        self.PARAMS_NAME_FILTER_TYPE = "filter_type"
+        self.PARAMS_NAME_FILTER_BODY = "filter_body"
+        filter_type = self.query_params.get(self.PARAMS_NAME_FILTER_TYPE)
+        filter_body = self.query_params.get(self.PARAMS_NAME_FILTER_BODY)
         # override query params with vector search query
-        body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_query_body(vector, efficient_filter)
+        body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_query_body(vector, efficient_filter, 
+                                                                                   filter_type=filter_type, filter_body=filter_body)
+        
+        if filter_type == "post_filter":
+            body_params["post_filter"] = filter_body
+        # if I pass in a dictionary does it change via side effects?
 
         self.logger.info("Note: returning as vector search query: %s", body_params)
 
@@ -1158,7 +1182,7 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         self.percent_completed = self.current / self.total
         return self.query_params
 
-    def _build_vector_search_query_body(self, vector, efficient_filter=None) -> dict:
+    def _build_vector_search_query_body(self, vector, efficient_filter=None, filter_type=None, filter_body=None) -> dict:
         """Builds a k-NN request that can be used to execute an approximate nearest
         neighbor search against a k-NN plugin index
         Args:
@@ -1190,9 +1214,44 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
                 }
             }
 
+        if filter_type and not efficient_filter and not filter_type == "post_filter":
+            return self._knn_query_with_filter(vector, knn_search_query, filter_type, filter_body)
+
         return knn_search_query
 
-
+    def _knn_query_with_filter(self, vector, knn_query, filter_type, filter_body) -> dict:
+        if filter_type == "script":
+            return {
+                "script_score": {
+                    "query": {"bool": {"filter": filter_body}},
+                    "script": {
+                        "source": "knn_score",
+                        "lang": "knn",
+                        "params": {
+                            "field": self.field_name,
+                            "query_value": vector,
+                            "space_type": "l2" # TODO make this configuratable. 
+                        }
+                    }
+                }
+            }
+        # post_filter moved outside of this function, since not all filter terms are in 
+        # the value corresponding to "query" key. 
+        # if filter_type == "post_filter":
+        #     return {
+        #         "query": knn_query,
+        #         "post_filter": filter_body
+        #     }
+        if filter_type == "boolean":
+            return {
+                "bool": {
+                    "filter": filter_body,
+                    "must": [knn_query]
+                }
+            }
+        
+        raise exceptions.ConfigurationError("Unsupported filter type: %s" % filter_type) 
+        
 class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
     """ Create bulk index requests from a data set of vectors.
 

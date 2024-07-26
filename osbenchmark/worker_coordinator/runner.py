@@ -1270,6 +1270,7 @@ class Query(Runner):
                 Returns:
                     Recall between predictions and top k neighbors from ground truth
                 """
+                self.logger.info("Recall with predictions: [%s], neighbors: [%s], top_k: %s", predictions, neighbors, top_k)
                 correct = 0.0
                 if neighbors is None:
                     self.logger.info("No neighbors are provided for recall calculation")
