@@ -1259,7 +1259,7 @@ class Query(Runner):
                 high = len(neighbors)
                 while low < high:
                     mid = (low + high) // 2
-                    if neighbors[mid] == -1:
+                    if neighbors[mid] == "-1":
                         high = mid
                     else:
                         low = mid + 1
@@ -1289,12 +1289,11 @@ class Query(Runner):
                 truth_set = neighbors[:min_num_of_results]
                 if last_neighbor_is_negative_1:
                     self.logger.info("Last neighbor is -1")
-                    # last_neighbor_idx = binary_search_for_last_negative_1(truth_set)
-
-                    as_set = set(truth_set)
-                    as_set.discard("-1")
-
-                    truth_set = list(as_set)
+                    last_neighbor_idx = binary_search_for_last_negative_1(truth_set)
+                    truth_set = truth_set[:last_neighbor_idx]
+                    # as_set = set(truth_set)
+                    # as_set.discard("-1")
+                    # truth_set = list(as_set)
 
                     if len(truth_set) == 0:
                         self.logger.info("No true neighbors after filtering, returning recall = 1.\n"

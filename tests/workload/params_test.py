@@ -3194,140 +3194,6 @@ class VectorSearchPartitionPartitionParamSourceTestCase(TestCase):
         
     
 
-    def test_params_when_multiple_query_type_provided_then_raise_exception(self):
-        # Create a data set
-        data_set_path = create_data_set(
-            self.DEFAULT_NUM_VECTORS,
-            self.DEFAULT_DIMENSION,
-            self.DEFAULT_TYPE,
-            Context.QUERY,
-            self.data_set_dir
-        )
-        neighbors_data_set_path = create_data_set(
-            self.DEFAULT_NUM_VECTORS,
-            self.DEFAULT_DIMENSION,
-            self.DEFAULT_TYPE,
-            Context.NEIGHBORS,
-            self.data_set_dir
-        )
-
-        test_param_source_params_1 = {
-            "field": self.DEFAULT_FIELD_NAME,
-            "data_set_format": self.DEFAULT_TYPE,
-            "data_set_path": data_set_path,
-            "neighbors_data_set_path": neighbors_data_set_path,
-            "k": 10,
-            "min_score": 0.5,
-        }
-
-        with self.assertRaisesRegex(ValueError, "Only one of k, max_distance, or min_score can be specified in vector search."):
-            query_param_source = VectorSearchPartitionParamSource(
-                workload.Workload(name="unit-test"),
-                test_param_source_params_1, {
-                    "index": self.DEFAULT_INDEX_NAME,
-                    "request-params": {},
-                    "body": {
-                        "size": 100,
-                    }
-                }
-            )
-            # This line won't be executed if exception is raised during initialization
-            query_param_source.partition(0, 1)
-
-        test_param_source_params_2 = {
-            "field": self.DEFAULT_FIELD_NAME,
-            "data_set_format": self.DEFAULT_TYPE,
-            "data_set_path": data_set_path,
-            "neighbors_data_set_path": neighbors_data_set_path,
-            "k": 10,
-            "max_distance": 100.0,
-        }
-
-        with self.assertRaisesRegex(ValueError, "Only one of k, max_distance, or min_score can be specified in vector search."):
-            query_param_source = VectorSearchPartitionParamSource(
-                workload.Workload(name="unit-test"),
-                test_param_source_params_2, {
-                    "index": self.DEFAULT_INDEX_NAME,
-                    "request-params": {},
-                    "body": {
-                        "size": 100,
-                    }
-                }
-            )
-            # This line won't be executed if exception is raised during initialization
-            query_param_source.partition(0, 1)
-
-        # Assert last call creates stop iteration
-        with self.assertRaises(StopIteration):
-            query_param_source_partition.params()
-        
-    # TODO: Combine all of the filter tests into a single parameterized test maybe (but would make the asserts hard). 
-    def test_script_score_filter(self):
-        # Create a data set
-        k = 12
-        data_set_path = create_data_set(
-            self.DEFAULT_NUM_VECTORS,
-            self.DEFAULT_DIMENSION,
-            self.DEFAULT_TYPE,
-            Context.QUERY,
-            self.data_set_dir
-        )
-        neighbors_data_set_path = create_data_set(
-            self.DEFAULT_NUM_VECTORS,
-            self.DEFAULT_DIMENSION,
-            self.DEFAULT_TYPE,
-            Context.NEIGHBORS,
-            self.data_set_dir
-        )
-        filter_body = {
-            "key": "value"
-        }
-
-        # Create a QueryVectorsFromDataSetParamSource with relevant params
-
-        SCRIPT_SCORE_FILTER_BODY = {
-    "bool": {
-          "must": [
-            {
-              "range": {
-                "rating": {
-                  "gte": 8,
-                  "lte": 10
-                }
-              }
-            },
-            {
-              "term": {
-                "parking": "true"
-              }
-            }
-          ]
-  }
-        }
-        test_param_source_params = {
-            "field": self.DEFAULT_FIELD_NAME,
-            "data_set_format": self.DEFAULT_TYPE,
-            "data_set_path": data_set_path,
-            "neighbors_data_set_path": neighbors_data_set_path,
-            "min_score": 0.5,
-            "max_distance": 100.0,
-            "k": 10,
-        }
-
-        with self.assertRaisesRegex(ValueError, "Only one of k, max_distance, or min_score can be specified in vector search."):
-            query_param_source = VectorSearchPartitionParamSource(
-                workload.Workload(name="unit-test"),
-                test_param_source_params_3, {
-                    "index": self.DEFAULT_INDEX_NAME,
-                    "request-params": {},
-                    "body": {
-                        "size": 100,
-                    }
-                }
-            )
-            # This line won't be executed if exception is raised during initialization
-            query_param_source.partition(0, 1)
-
     def _check_params(
             self,
             actual_params: dict,
@@ -3563,7 +3429,66 @@ class BulkVectorsFromDataSetParamSourceTestCase(TestCase):
                 continue
             self.assertTrue(expected_id_field in req_body)
 
-class VectorsAttributeCase(TestCase):
+
+class VectorSearchFilterTestCase(TestCase):
+
+    def test_params_post_filter(
+        self
+    ):
+        num_vectors = 49
+        bulk_size = 10
+        data_set_path = create_data_set(
+            num_vectors,
+            self.DEFAULT_DIMENSION,
+            self.DEFAULT_TYPE,
+            Context.INDEX,
+            self.data_set_dir
+        )
+        parent_data_set_path = create_attributes_data_set(
+            num_vectors,
+            self.DEFAULT_DIMENSION,
+            self.DEFAULT_TYPE,
+            Context.ATTRIBUTES,
+            self.data_set_dir,
+        ) # TODO this is a little bit messed up. 
+
+        test_param_source_params = {
+            "index": self.DEFAULT_INDEX_NAME,
+            "field": self.DEFAULT_VECTOR_FIELD_NAME,
+            "data_set_format": self.DEFAULT_TYPE,
+            "data_set_path": data_set_path,
+            "bulk_size": bulk_size,
+            "id-field-name": self.DEFAULT_ID_FIELD_NAME,
+            "has_attributes": 0
+        }
+        bulk_param_source = BulkVectorsFromDataSetParamSource(
+            workload.Workload(name="unit-test"), test_param_source_params
+        )
+        bulk_param_source.parent_data_set_path = parent_data_set_path
+        bulk_param_source_partition = bulk_param_source.partition(0, 1)
+        # Check each payload returned
+        vectors_consumed = 0
+        while vectors_consumed < num_vectors:
+            expected_num_vectors = min(num_vectors - vectors_consumed, bulk_size)
+            actual_params = bulk_param_source_partition.params()
+            self._check_params_attributes(
+                actual_params,
+                self.DEFAULT_INDEX_NAME,
+                self.DEFAULT_VECTOR_FIELD_NAME,
+                self.DEFAULT_DIMENSION,
+                expected_num_vectors,
+                self.DEFAULT_ID_FIELD_NAME,
+            )
+            vectors_consumed += expected_num_vectors
+
+        # Assert last call creates stop iteration
+        with self.assertRaises(StopIteration):
+            bulk_param_source_partition.params()
+
+    
+    
+
+class BulkVectorsAttributeCase(TestCase):
     DEFAULT_INDEX_NAME = "test-partition-index"
     DEFAULT_VECTOR_FIELD_NAME = "test-vector-field"
     DEFAULT_CONTEXT = Context.INDEX
@@ -3574,9 +3499,13 @@ class VectorsAttributeCase(TestCase):
     DEFAULT_ID_FIELD_NAME = "_id"
     ATTRIBUTES_LIST = ['taste', 'color', 'age']
 
-class VectorSearchFilterTestCase(TestCase):
+    def setUp(self) -> None:
+        self.data_set_dir = tempfile.mkdtemp()
 
-    def test_params_post_filter(
+    def tearDown(self):
+        shutil.rmtree(self.data_set_dir)
+
+    def test_params_efficient_filter(
         self
     ):
         num_vectors = 49
@@ -3628,44 +3557,6 @@ class VectorSearchFilterTestCase(TestCase):
         # Assert last call creates stop iteration
         with self.assertRaises(StopIteration):
             bulk_param_source_partition.params()
-    def _check_params_attributes(
-            self,
-        actual_params: dict,
-        expected_index: str,
-        expected_vector_field: str,
-        expected_dimension: int,
-        expected_num_vectors_in_payload: int,
-        expected_id_field: str,
-    ):
-        size = actual_params.get("size")
-        self.assertEqual(size, expected_num_vectors_in_payload)
-        body = actual_params.get("body")
-        self.assertIsInstance(body, list)
-        self.assertEqual(len(body) // 2, expected_num_vectors_in_payload)
-
-        # Bulk payload has 2 parts: first one is the header and the second one
-        # is the body. The header will have the index name and the body will
-        # have the vector
-        for header, req_body in zip(*[iter(body)] * 2):
-            index = header.get("index")
-            self.assertIsInstance(index, dict)
-
-            index_name = index.get("_index")
-            self.assertEqual(index_name, expected_index)
-
-            vector = req_body.get(expected_vector_field)
-            self.assertIsInstance(vector, list)
-            self.assertEqual(len(vector), expected_dimension)
-
-            for attribute in self.ATTRIBUTES_LIST:
-                self.assertTrue(attribute in req_body)
-            
-            if expected_id_field in index:
-                self.assertEqual(self.DEFAULT_ID_FIELD_NAME, expected_id_field)
-                self.assertFalse(expected_id_field in req_body)
-                continue
-            self.assertTrue(expected_id_field in req_body)
-
 
     def _check_params_attributes(
             self,

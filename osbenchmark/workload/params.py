@@ -33,7 +33,7 @@ import random
 import time
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple
 
 import numpy as np
 
@@ -884,6 +884,8 @@ class VectorDataSetPartitionParamSource(ParamSource):
     def __init__(self, workload, params, context: Context, **kwargs):
         super().__init__(workload, params, **kwargs)
         self.field_name: str = parse_string_parameter("field", params)
+        self.NESTED_FIELD_SEPARATOR = "."
+        self.is_nested = self.NESTED_FIELD_SEPARATOR in self.field_name # in base class because used for both bulk ingest and queries.
         self.context = context
         self.data_set_format = parse_string_parameter("data_set_format", params)
         self.data_set_path = parse_string_parameter("data_set_path", params, "")
@@ -979,6 +981,18 @@ class VectorDataSetPartitionParamSource(ParamSource):
         partition_x.current = partition_x.offset
         return partition_x
 
+    def get_split_fields(self) -> Tuple[str, str]:
+        fields_as_array = self.field_name.split(self.NESTED_FIELD_SEPARATOR)
+
+        # TODO: Add support to multiple levels of nesting if a future benchmark requires it.
+
+        if len(fields_as_array) != 2:
+            raise ValueError(
+                f"Field name {self.field_name} is not a nested field name. Currently we support only 1 level of nesting."
+            )
+        return fields_as_array[0], fields_as_array[1]
+
+
     @abstractmethod
     def params(self):
         """
@@ -1027,8 +1041,6 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         request-params: query parameters that can be passed to search request
     """
     PARAMS_NAME_K = "k"
-    PARAMS_NAME_MAX_DISTANCE = "max_distance"
-    PARAMS_NAME_MIN_SCORE = "min_score"
     PARAMS_NAME_BODY = "body"
     PARAMS_NAME_SIZE = "size"
     PARAMS_NAME_QUERY = "query"
@@ -1045,27 +1057,11 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
     PARAMS_NAME_REQUEST_PARAMS = "request-params"
     PARAMS_NAME_SOURCE = "_source"
     PARAMS_NAME_ALLOW_PARTIAL_RESULTS = "allow_partial_search_results"
-    MIN_SCORE_QUERY_TYPE = "min_score"
-    MAX_DISTANCE_QUERY_TYPE = "max_distance"
-    KNN_QUERY_TYPE = "knn"
-    DEFAULT_RADIAL_SEARCH_QUERY_RESULT_SIZE = 10000
 
     def __init__(self, workloads, params, query_params, **kwargs):
         super().__init__(workloads, params, Context.QUERY, **kwargs)
         self.logger = logging.getLogger(__name__)
-        self.k = None
-        self.distance = None
-        self.score = None
-        if self.PARAMS_NAME_K in params:
-            self.k = parse_int_parameter(self.PARAMS_NAME_K, params)
-            self.query_type = self.KNN_QUERY_TYPE
-        if self.PARAMS_NAME_MAX_DISTANCE in params:
-            self.distance = parse_float_parameter(self.PARAMS_NAME_MAX_DISTANCE, params)
-            self.query_type = self.MAX_DISTANCE_QUERY_TYPE
-        if self.PARAMS_NAME_MIN_SCORE in params:
-            self.score = parse_float_parameter(self.PARAMS_NAME_MIN_SCORE, params)
-            self.query_type = self.MIN_SCORE_QUERY_TYPE
-        self._validate_query_type_parameters()
+        self.k = parse_int_parameter(self.PARAMS_NAME_K, params)
         self.repetitions = parse_int_parameter(self.PARAMS_NAME_REPETITIONS, params, 1)
         self.current_rep = 1
         self.neighbors_data_set_format = parse_string_parameter(
@@ -1078,9 +1074,13 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
                                                 self.PARAMS_VALUE_VECTOR_SEARCH)
         self.query_params = query_params
         self.query_params.update({
+            self.PARAMS_NAME_K: self.k,
             self.PARAMS_NAME_OPERATION_TYPE: operation_type,
             self.PARAMS_NAME_ID_FIELD_NAME: params.get(self.PARAMS_NAME_ID_FIELD_NAME),
         })
+
+        self.filter_type = self.query_params.get(self.PARAMS_NAME_FILTER_TYPE)
+        self.filter_body = self.query_params.get(self.PARAMS_NAME_FILTER_BODY)
 
 
         if self.PARAMS_NAME_FILTER in params:
@@ -1103,10 +1103,6 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
             neighbors_corpora = self.extract_corpora(self.neighbors_data_set_corpus, self.neighbors_data_set_format)
             self.corpora.extend(corpora for corpora in neighbors_corpora if corpora not in self.corpora)
 
-    def _validate_query_type_parameters(self):
-        if bool(self.k) + bool(self.distance) + bool(self.score) > 1:
-            raise ValueError("Only one of k, max_distance, or min_score can be specified in vector search.")
-
     @staticmethod
     def _validate_neighbors_data_set(file_path, corpus):
         if file_path and corpus:
@@ -1121,36 +1117,21 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
             self.PARAMS_NAME_ALLOW_PARTIAL_RESULTS, "false")
         self.query_params.update({self.PARAMS_NAME_REQUEST_PARAMS: request_params})
 
-    def _get_query_neighbors(self):
-        if self.query_type == self.KNN_QUERY_TYPE:
-            return Context.NEIGHBORS
-        if self.query_type == self.MIN_SCORE_QUERY_TYPE:
-            return Context.MIN_SCORE_NEIGHBORS
-        if self.query_type == self.MAX_DISTANCE_QUERY_TYPE:
-            return Context.MAX_DISTANCE_NEIGHBORS
-        raise Exception("Unknown query type [%s]" % self.query_type)
-
-    def _get_query_size(self):
-        if self.query_type == self.KNN_QUERY_TYPE:
-            return self.k
-        return self.DEFAULT_RADIAL_SEARCH_QUERY_RESULT_SIZE
-
     def _update_body_params(self, vector):
         # accept body params if passed from workload, else, create empty dictionary
         body_params = self.query_params.get(self.PARAMS_NAME_BODY) or dict()
         if self.PARAMS_NAME_SIZE not in body_params:
-            body_params[self.PARAMS_NAME_SIZE] = self._get_query_size()
+            body_params[self.PARAMS_NAME_SIZE] = self.k
         if self.PARAMS_NAME_QUERY in body_params:
             self.logger.warning(
                 "[%s] param from body will be replaced with vector search query.", self.PARAMS_NAME_QUERY)
 
         self.logger.info("Here, we have query_params: %s ", self.query_params)
         efficient_filter=self.query_params.get(self.PARAMS_NAME_FILTER)
+        filter_type=self.query_params.get(self.PARAMS_NAME_FILTER_TYPE)
+        filter_body=self.query_params.get(self.PARAMS_NAME_FILTER_BODY)
         self.logger.info("Efficient filter: %s", efficient_filter)
-        self.PARAMS_NAME_FILTER_TYPE = "filter_type"
-        self.PARAMS_NAME_FILTER_BODY = "filter_body"
-        filter_type = self.query_params.get(self.PARAMS_NAME_FILTER_TYPE)
-        filter_body = self.query_params.get(self.PARAMS_NAME_FILTER_BODY)
+        
         # override query params with vector search query
         body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_query_body(vector, efficient_filter, 
                                                                                    filter_type=filter_type, filter_body=filter_body)
@@ -1174,7 +1155,7 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
             self.neighbors_data_set_path = self.data_set_path
         # add neighbor instance to partition
         partition.neighbors_data_set = get_data_set(
-            self.neighbors_data_set_format, self.neighbors_data_set_path, self._get_query_neighbors())
+            self.neighbors_data_set_format, self.neighbors_data_set_path, Context.NEIGHBORS)
         partition.neighbors_data_set.seek(partition.offset)
         return partition
 
@@ -1193,7 +1174,7 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
             raise StopIteration
         vector = self.data_set.read(1)[0]
         neighbor = self.neighbors_data_set.read(1)[0]
-        true_neighbors = list(map(str, neighbor[:self.k] if self.k else neighbor))
+        true_neighbors = list(map(str, neighbor[:self.k]))
         self.query_params.update({
             "neighbors": true_neighbors,
         })
@@ -1208,43 +1189,32 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         neighbor search against a k-NN plugin index
         Args:
             vector: vector used for query
-            efficient_filter: efficient filter used for query
         Returns:
             A dictionary containing the body used for search query
         """
-        query = {}
-        if self.query_type == self.KNN_QUERY_TYPE:
-            query.update({
-                "k": self.k,
-            })
-        elif self.query_type == self.MIN_SCORE_QUERY_TYPE:
-            query.update({
-                "min_score": self.score,
-            })
-        elif self.query_type == self.MAX_DISTANCE_QUERY_TYPE:
-            query.update({
-                "max_distance": self.distance,
-            })
-        else:
-            raise Exception("Unknown query type [%s]" % self.query_type)
-
-        query.update({
+        query = {
             "vector": vector,
-        })
-
+            "k": self.k,
+        }
         if efficient_filter:
             query.update({
                 "filter": efficient_filter,
             })
-        return {
+
+        knn_search_query = {
             "knn": {
                 self.field_name: query,
             },
         }
 
-
-        if filter_type and not efficient_filter and not filter_type == "post_filter":
-            return self._knn_query_with_filter(vector, knn_search_query, filter_type, filter_body)
+        if self.is_nested:
+            outer_field_name, _inner_field_name = self.get_split_fields()
+            return {
+                "nested": {
+                    "path": outer_field_name,
+                    "query": knn_search_query
+                }
+            }
 
         if filter_type and not efficient_filter and not filter_type == "post_filter":
             return self._knn_query_with_filter(vector, knn_search_query, filter_type, filter_body)
@@ -1279,7 +1249,7 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
                 "bool": {
                     "filter": filter_body,
                     "must": [knn_query]
-                }
+            }
             }
         
         raise exceptions.ConfigurationError("Unsupported filter type: %s" % filter_type) 
@@ -1299,13 +1269,12 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
     def __init__(self, workload, params, **kwargs):
         super().__init__(workload, params, Context.INDEX, **kwargs)
         self.bulk_size: int = parse_int_parameter("bulk_size", params)
-        self.retries: int = parse_int_parameter("retries", params,
-                                                self.DEFAULT_RETRIES)
+        self.retries: int = parse_int_parameter("retries", params, self.DEFAULT_RETRIES)
         self.index_name: str = parse_string_parameter("index", params)
         self.id_field_name: str = parse_string_parameter(
             self.PARAMS_NAME_ID_FIELD_NAME, params, self.DEFAULT_ID_FIELD_NAME
         )
-        self.has_attributes : bool = parse_int_parameter("has_attributes", params, 0)
+        self.has_attributes : bool = parse_bool_parameter("has_attributes", params, False)
 
         self.action_buffer = None
         self.num_nested_vectors = 10
@@ -1386,7 +1355,7 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
 
         # self.logger.info("Has attributes: %s, bulk contents: %s", self.has_attributes, bulk_contents)
         actions[1::2] = bulk_contents
-        self.logger.info("With Attributes called.")
+        # self.logger.info("With Attributes called.")
         # self.logger.info("Actions: %s", actions)
         return actions
 
@@ -1437,18 +1406,58 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
         if self.has_attributes:
             return self.bulk_transform_add_attributes(partition, action, attributes)
         actions = []
-        _ = [
-            actions.extend([action(self.id_field_name, i + self.current), None])
-            for i in range(len(partition))
-        ]
-        bulk_contents = []
+
+        outer_field_name, inner_field_name = self.get_split_fields()
+
         add_id_field_to_body = self.id_field_name != self.DEFAULT_ID_FIELD_NAME
-        for vec, identifier in zip(partition.tolist(), range(self.current, self.current + len(partition))):
-            row = {self.field_name: vec}
+
+        if self.action_buffer is None:
+            first_index_of_parent_ids = 0
+            self.action_buffer = {outer_field_name: []}
+            self.action_parent_id = parents_ids[first_index_of_parent_ids]
             if add_id_field_to_body:
-                row.update({self.id_field_name: identifier})
-            bulk_contents.append(row)
-        actions[1::2] = bulk_contents
+                self.action_buffer.update({self.id_field_name: self.action_parent_id})
+
+        part_list = partition.tolist()
+        for i in range(len(partition)):
+
+            nested = {inner_field_name: part_list[i]}
+
+            current_parent_id = parents_ids[i]
+
+            if self.action_parent_id == current_parent_id:
+                self.action_buffer[outer_field_name].append(nested)
+            else:
+                # flush action buffer
+                actions.extend(
+                    [
+                        action(self.id_field_name, self.action_parent_id),
+                        self.action_buffer,
+                    ]
+                )
+
+                self.current += len(self.action_buffer[outer_field_name])
+
+                self.action_buffer = {outer_field_name: []}
+                if add_id_field_to_body:
+
+                    self.action_buffer.update({self.id_field_name: current_parent_id})
+
+                self.action_buffer[outer_field_name].append(nested)
+
+                self.action_parent_id = current_parent_id
+
+        max_position = self.offset + self.num_vectors
+        if (
+            self.current + len(self.action_buffer[outer_field_name]) + self.bulk_size
+            >= max_position
+        ):
+            # final flush of remaining vectors in the last partition (for the last client)
+            self.current += len(self.action_buffer[outer_field_name])
+            actions.extend(
+                [action(self.id_field_name, self.action_parent_id), self.action_buffer]
+            )
+
         return actions
 
     def params(self):
@@ -1460,29 +1469,39 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
 
         def action(id_field_name, doc_id):
             # support only index operation
-            bulk_action = 'index'
-            metadata = {
-                '_index': self.index_name
-            }
+            bulk_action = "index"
+            metadata = {"_index": self.index_name}
             # Add id field to metadata only if it is _id
             if id_field_name == self.DEFAULT_ID_FIELD_NAME:
                 metadata.update({id_field_name: doc_id})
             return {bulk_action: metadata}
 
         remaining_vectors_in_partition = self.num_vectors + self.offset - self.current
-        # update bulk size if number of vectors to read is less than actual bulk size
+
         bulk_size = min(self.bulk_size, remaining_vectors_in_partition)
+
         partition = self.data_set.read(bulk_size)
-        body = self.bulk_transform(partition, action)
+
+        if self.is_nested:
+            parent_ids = self.parent_data_set.read(bulk_size)
+        else:
+            parent_ids = None
+
+        if self.has_attributes:
+            attributes = self.attributes_data_set.read(bulk_size)
+        else:
+            attributes = None
+
+        body = self.bulk_transform(partition, action, parent_ids, attributes)
         size = len(body) // 2
-        self.current += size
+
+        if not self.is_nested:
+            # in the nested case, we may have irregular number of vectors ingested,
+            # so we calculate self.current within bulk_transform method when self.is_nested.
+            self.current += size
         self.percent_completed = self.current / self.total
 
-        return {
-            "body": body,
-            "retries": self.retries,
-            "size": size
-        }
+        return {"body": body, "retries": self.retries, "size": size}
 
 
 def get_target(workload, params):

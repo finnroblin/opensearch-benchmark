@@ -26,6 +26,7 @@ class Context(Enum):
     NEIGHBORS = 3
     MAX_DISTANCE_NEIGHBORS = 4
     MIN_SCORE_NEIGHBORS = 5
+    ATTRIBUTES=7
 
 
 class DataSet(ABC):
@@ -148,6 +149,9 @@ class HDF5DataSet(DataSet):
 
         if context == Context.MIN_SCORE_NEIGHBORS:
             return "min_score_neighbors"
+        
+        if context == Context.ATTRIBUTES:
+            return "attributes"
 
         raise Exception("Unsupported context")
 
