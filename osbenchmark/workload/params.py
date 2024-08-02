@@ -40,7 +40,7 @@ import numpy as np
 from osbenchmark import exceptions
 from osbenchmark.utils import io
 from osbenchmark.utils.dataset import DataSet, get_data_set, Context
-from osbenchmark.utils.parse import parse_string_parameter, parse_int_parameter, parse_float_parameter
+from osbenchmark.utils.parse import parse_string_parameter, parse_int_parameter, parse_bool_parameter
 from osbenchmark.workload import workload
 
 __PARAM_SOURCES_BY_OP = {}
@@ -1033,6 +1033,8 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
     PARAMS_NAME_SIZE = "size"
     PARAMS_NAME_QUERY = "query"
     PARAMS_NAME_FILTER = "filter"
+    PARAMS_NAME_FILTER_TYPE = "filter_type"
+    PARAMS_NAME_FILTER_BODY = "filter_body"
     PARAMS_NAME_REPETITIONS = "repetitions"
     PARAMS_NAME_NEIGHBORS_DATA_SET_FORMAT = "neighbors_data_set_format"
     PARAMS_NAME_NEIGHBORS_DATA_SET_PATH = "neighbors_data_set_path"
@@ -1079,21 +1081,21 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
             self.PARAMS_NAME_OPERATION_TYPE: operation_type,
             self.PARAMS_NAME_ID_FIELD_NAME: params.get(self.PARAMS_NAME_ID_FIELD_NAME),
         })
-        if self.PARAMS_NAME_K in params:
-            self.query_params.update({
-                self.PARAMS_NAME_K: self.k
-            })
-        if self.PARAMS_NAME_MAX_DISTANCE in params:
-            self.query_params.update({
-                self.PARAMS_NAME_MAX_DISTANCE: self.distance
-            })
-        if self.PARAMS_NAME_MIN_SCORE in params:
-            self.query_params.update({
-                self.PARAMS_NAME_MIN_SCORE: self.score
-            })
+
+
         if self.PARAMS_NAME_FILTER in params:
             self.query_params.update({
                 self.PARAMS_NAME_FILTER:  params.get(self.PARAMS_NAME_FILTER)
+            })
+        
+        if self.PARAMS_NAME_FILTER_TYPE in params:
+            self.query_params.update({
+                self.PARAMS_NAME_FILTER_TYPE:  params.get(self.PARAMS_NAME_FILTER_TYPE)
+            })
+
+        if self.PARAMS_NAME_FILTER_BODY in params:
+            self.query_params.update({
+                self.PARAMS_NAME_FILTER_BODY:  params.get(self.PARAMS_NAME_FILTER_BODY)
             })
         # if neighbors data set is defined as corpus, extract corresponding corpus from workload
         # and add it to corpora list
@@ -1141,9 +1143,24 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         if self.PARAMS_NAME_QUERY in body_params:
             self.logger.warning(
                 "[%s] param from body will be replaced with vector search query.", self.PARAMS_NAME_QUERY)
-        efficient_filter = self.query_params.get(self.PARAMS_NAME_FILTER)
+
+        self.logger.info("Here, we have query_params: %s ", self.query_params)
+        efficient_filter=self.query_params.get(self.PARAMS_NAME_FILTER)
+        self.logger.info("Efficient filter: %s", efficient_filter)
+        self.PARAMS_NAME_FILTER_TYPE = "filter_type"
+        self.PARAMS_NAME_FILTER_BODY = "filter_body"
+        filter_type = self.query_params.get(self.PARAMS_NAME_FILTER_TYPE)
+        filter_body = self.query_params.get(self.PARAMS_NAME_FILTER_BODY)
         # override query params with vector search query
-        body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_query_body(vector, efficient_filter)
+        body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_query_body(vector, efficient_filter, 
+                                                                                   filter_type=filter_type, filter_body=filter_body)
+        
+        if filter_type == "post_filter":
+            body_params["post_filter"] = filter_body
+        # if I pass in a dictionary does it change via side effects?
+
+        self.logger.info("Note: returning as vector search query: %s", body_params)
+
         self.query_params.update({self.PARAMS_NAME_BODY: body_params})
 
     def partition(self, partition_index, total_partitions):
@@ -1186,8 +1203,8 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         self.percent_completed = self.current / self.total
         return self.query_params
 
-    def _build_vector_search_query_body(self, vector, efficient_filter=None) -> dict:
-        """Builds a vector search request that can be used to execute an approximate nearest
+    def _build_vector_search_query_body(self, vector, efficient_filter=None, filter_type=None, filter_body=None) -> dict:
+        """Builds a k-NN request that can be used to execute an approximate nearest
         neighbor search against a k-NN plugin index
         Args:
             vector: vector used for query
@@ -1226,6 +1243,47 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         }
 
 
+        if filter_type and not efficient_filter and not filter_type == "post_filter":
+            return self._knn_query_with_filter(vector, knn_search_query, filter_type, filter_body)
+
+        if filter_type and not efficient_filter and not filter_type == "post_filter":
+            return self._knn_query_with_filter(vector, knn_search_query, filter_type, filter_body)
+
+        return knn_search_query
+
+    def _knn_query_with_filter(self, vector, knn_query, filter_type, filter_body) -> dict:
+        if filter_type == "script":
+            return {
+                "script_score": {
+                    "query": {"bool": {"filter": filter_body}},
+                    "script": {
+                        "source": "knn_score",
+                        "lang": "knn",
+                        "params": {
+                            "field": self.field_name,
+                            "query_value": vector,
+                            "space_type": "l2" # TODO make this configuratable. 
+                        }
+                    }
+                }
+            }
+        # post_filter moved outside of this function, since not all filter terms are in 
+        # the value corresponding to "query" key. 
+        # if filter_type == "post_filter":
+        #     return {
+        #         "query": knn_query,
+        #         "post_filter": filter_body
+        #     }
+        if filter_type == "boolean":
+            return {
+                "bool": {
+                    "filter": filter_body,
+                    "must": [knn_query]
+                }
+            }
+        
+        raise exceptions.ConfigurationError("Unsupported filter type: %s" % filter_type) 
+        
 class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
     """ Create bulk index requests from a data set of vectors.
 
@@ -1245,9 +1303,124 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
                                                 self.DEFAULT_RETRIES)
         self.index_name: str = parse_string_parameter("index", params)
         self.id_field_name: str = parse_string_parameter(
-            self.PARAMS_NAME_ID_FIELD_NAME, params, self.DEFAULT_ID_FIELD_NAME)
+            self.PARAMS_NAME_ID_FIELD_NAME, params, self.DEFAULT_ID_FIELD_NAME
+        )
+        self.has_attributes : bool = parse_int_parameter("has_attributes", params, 0)
 
-    def bulk_transform(self, partition: np.ndarray, action) -> List[Dict[str, Any]]:
+        self.action_buffer = None
+        self.num_nested_vectors = 10
+
+        self.parent_data_set_path = parse_string_parameter(
+            "parents_data_set_path", params, self.data_set_path
+        )
+
+        self.parent_data_set_format = self.data_set_format
+
+        self.parent_data_set_corpus = self.data_set_corpus
+
+        self.logger = logging.getLogger(__name__)
+
+        self.logger.info("Params: is_nested: %s, has_attributes: %s", self.is_nested, self.has_attributes)
+
+
+    def partition(self, partition_index, total_partitions):
+        partition = super().partition(partition_index, total_partitions)
+        if self.parent_data_set_corpus and not self.parent_data_set_path:
+            parent_data_set_path = self._get_corpora_file_paths(
+                self.parent_data_set_corpus, self.parent_data_set_format
+            )
+            self._validate_data_set_corpus(parent_data_set_path)
+            self.parent_data_set_path = parent_data_set_path[0]
+        if not self.parent_data_set_path:
+            self.parent_data_set_path = self.data_set_path
+        # add neighbor instance to partition
+        if self.is_nested:
+            partition.parent_data_set = get_data_set(
+                self.parent_data_set_format, self.parent_data_set_path, Context.PARENTS
+            )
+            partition.parent_data_set.seek(partition.offset)
+
+        if self.has_attributes:
+            self.logger.info("Trying to read attributes dataset")
+            partition.attributes_data_set = get_data_set(
+                self.parent_data_set_format, self.parent_data_set_path, Context.ATTRIBUTES
+            )
+            # self.logger.info("Attributes dataset: %s", partition.attributes_data_set)
+            # self.logger.info("Here is the first entry: %s", partition.attributes_data_set.read(0))
+            partition.attributes_data_set.seek(partition.offset)
+
+        return partition
+    
+    def bulk_transform_add_attributes(self, partition: np.ndarray, action, attributes: np.ndarray) ->   List[Dict[str, Any]]:
+        """attributes is a (partition_len x 4) matrix. """
+        actions = []
+
+        _ = [
+                actions.extend([action(self.id_field_name, i + self.current), None])
+                for i in range(len(partition))
+            ]
+        bulk_contents = []
+
+        add_id_field_to_body = self.id_field_name != self.DEFAULT_ID_FIELD_NAME
+        for vec, attribute_list, identifier in zip(
+            partition.tolist(), attributes.tolist(), range(self.current, self.current + len(partition))
+        ):
+            row = {self.field_name: vec}
+            
+            for idx, attribute_name, attribute_type in zip(range(3), ["color", "taste", "age"], [str, str, int]):
+            # for idx, attribute_name, attribute_type in zip(range(3), ["taste", "color", "age"], [str, str, int]):
+                if attribute_type == str:
+                    if attribute_list[idx].decode() != "None":
+                        row.update({attribute_name : attribute_list[idx].decode()})
+                        # print("SOME ff")
+                    # else:
+                    #     print("NONE FOUND!!!")
+                else:
+                    # print(attribute_type(attribute_list[idx].decode()))
+                    row.update({attribute_name : attribute_type(attribute_list[idx].decode())})
+            if add_id_field_to_body:
+                row.update({self.id_field_name: identifier})
+
+            # print(row)
+            bulk_contents.append(row)
+
+        # self.logger.info("Has attributes: %s, bulk contents: %s", self.has_attributes, bulk_contents)
+        actions[1::2] = bulk_contents
+        self.logger.info("With Attributes called.")
+        # self.logger.info("Actions: %s", actions)
+        return actions
+
+
+    def bulk_transform_non_nested(self, partition: np.ndarray, action) -> List[Dict[str, Any]]:
+        """
+        Create bulk ingest actions for data with a non-nested field.
+        """
+        actions = []
+
+        _ = [
+                actions.extend([action(self.id_field_name, i + self.current), None])
+                for i in range(len(partition))
+            ]
+        bulk_contents = []
+
+        add_id_field_to_body = self.id_field_name != self.DEFAULT_ID_FIELD_NAME
+        for vec, identifier in zip(
+            partition.tolist(), range(self.current, self.current + len(partition))
+        ):
+            row = {self.field_name: vec}
+            if add_id_field_to_body:
+                row.update({self.id_field_name: identifier})
+            bulk_contents.append(row)
+
+        actions[1::2] = bulk_contents
+
+        self.logger.info("Actions: %s", actions)
+        return actions
+
+
+    def bulk_transform(
+        self, partition: np.ndarray, action, parents_ids: Optional[np.ndarray], attributes: Optional[np.ndarray] # maybe attributes is a (partition_len x 3) matrix.  
+    ) -> List[Dict[str, Any]]:
         """Partitions and transforms a list of vectors into OpenSearch's bulk
         injection format.
         Args:
@@ -1257,6 +1430,12 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
         Returns:
             An array of transformed vectors in bulk format.
         """
+        if not self.is_nested and not self.has_attributes:
+            return self.bulk_transform_non_nested(partition, action)
+
+        # TODO: Assumption: we won't add attributes if we're also doing a nested query. 
+        if self.has_attributes:
+            return self.bulk_transform_add_attributes(partition, action, attributes)
         actions = []
         _ = [
             actions.extend([action(self.id_field_name, i + self.current), None])
