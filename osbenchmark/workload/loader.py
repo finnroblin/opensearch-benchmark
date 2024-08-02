@@ -1659,10 +1659,12 @@ class WorkloadSpecificationReader:
         default_warmup_time_period = self._r(ops_spec, "warmup-time-period", error_ctx="parallel", mandatory=False)
         default_time_period = self._r(ops_spec, "time-period", error_ctx="parallel", mandatory=False)
         clients = self._r(ops_spec, "clients", error_ctx="parallel", mandatory=False)
+        self.logger.info("Info: number of clients: %s", clients)
         completed_by = self._r(ops_spec, "completed-by", error_ctx="parallel", mandatory=False)
 
         # now descent to each operation
         tasks = []
+        self.logger.info("All tasks: %s", self._r(ops_spec, "tasks", error_ctx="parallel"))
         for task in self._r(ops_spec, "tasks", error_ctx="parallel"):
             tasks.append(self.parse_task(task, ops, test_procedure_name, default_warmup_iterations, default_iterations,
                                          default_warmup_time_period, default_time_period, completed_by))

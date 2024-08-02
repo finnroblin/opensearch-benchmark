@@ -3109,7 +3109,7 @@ class VectorSearchPartitionPartitionParamSourceTestCase(TestCase):
         with self.assertRaises(StopIteration):
             query_param_source_partition.params()
         
-    
+    # TODO: Combine all of the filter tests into a single parameterized test maybe (but would make the asserts hard). 
     def test_script_score_filter(self):
         # Create a data set
         k = 12

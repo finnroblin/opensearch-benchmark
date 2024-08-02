@@ -40,7 +40,7 @@ import numpy as np
 from osbenchmark import exceptions
 from osbenchmark.utils import io
 from osbenchmark.utils.dataset import DataSet, get_data_set, Context
-from osbenchmark.utils.parse import parse_string_parameter, parse_int_parameter
+from osbenchmark.utils.parse import parse_string_parameter, parse_int_parameter, parse_bool_parameter
 from osbenchmark.workload import workload
 
 __PARAM_SOURCES_BY_OP = {}
@@ -1079,6 +1079,9 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
             self.PARAMS_NAME_ID_FIELD_NAME: params.get(self.PARAMS_NAME_ID_FIELD_NAME),
         })
 
+        self.filter_type = self.query_params.get(self.PARAMS_NAME_FILTER_TYPE)
+        self.filter_body = self.query_params.get(self.PARAMS_NAME_FILTER_BODY)
+
 
         if self.PARAMS_NAME_FILTER in params:
             self.query_params.update({
@@ -1125,11 +1128,10 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
 
         self.logger.info("Here, we have query_params: %s ", self.query_params)
         efficient_filter=self.query_params.get(self.PARAMS_NAME_FILTER)
+        filter_type=self.query_params.get(self.PARAMS_NAME_FILTER_TYPE)
+        filter_body=self.query_params.get(self.PARAMS_NAME_FILTER_BODY)
         self.logger.info("Efficient filter: %s", efficient_filter)
-        self.PARAMS_NAME_FILTER_TYPE = "filter_type"
-        self.PARAMS_NAME_FILTER_BODY = "filter_body"
-        filter_type = self.query_params.get(self.PARAMS_NAME_FILTER_TYPE)
-        filter_body = self.query_params.get(self.PARAMS_NAME_FILTER_BODY)
+        
         # override query params with vector search query
         body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_query_body(vector, efficient_filter, 
                                                                                    filter_type=filter_type, filter_body=filter_body)
@@ -1247,7 +1249,7 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
                 "bool": {
                     "filter": filter_body,
                     "must": [knn_query]
-                }
+            }
             }
         
         raise exceptions.ConfigurationError("Unsupported filter type: %s" % filter_type) 
@@ -1272,7 +1274,7 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
         self.id_field_name: str = parse_string_parameter(
             self.PARAMS_NAME_ID_FIELD_NAME, params, self.DEFAULT_ID_FIELD_NAME
         )
-        self.has_attributes : bool = parse_int_parameter("has_attributes", params, 0)
+        self.has_attributes : bool = parse_bool_parameter("has_attributes", params, False)
 
         self.action_buffer = None
         self.num_nested_vectors = 10
@@ -1286,6 +1288,9 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
         self.parent_data_set_corpus = self.data_set_corpus
 
         self.logger = logging.getLogger(__name__)
+
+        self.logger.info("Params: is_nested: %s, has_attributes: %s", self.is_nested, self.has_attributes)
+
 
     def partition(self, partition_index, total_partitions):
         partition = super().partition(partition_index, total_partitions)
@@ -1316,7 +1321,7 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
         return partition
     
     def bulk_transform_add_attributes(self, partition: np.ndarray, action, attributes: np.ndarray) ->   List[Dict[str, Any]]:
-        """attributes is a (partition_len x 3) matrix. """
+        """attributes is a (partition_len x 4) matrix. """
         actions = []
 
         _ = [
@@ -1330,14 +1335,27 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
             partition.tolist(), attributes.tolist(), range(self.current, self.current + len(partition))
         ):
             row = {self.field_name: vec}
-            for idx, attribute_name, attribute_type in zip(range(3), ["taste", "color", "age"], [str, str, int]):
-                row.update({attribute_name : attribute_type(attribute_list[idx])})
+            
+            for idx, attribute_name, attribute_type in zip(range(3), ["color", "taste", "age"], [str, str, int]):
+            # for idx, attribute_name, attribute_type in zip(range(3), ["taste", "color", "age"], [str, str, int]):
+                if attribute_type == str:
+                    if attribute_list[idx].decode() != "None":
+                        row.update({attribute_name : attribute_list[idx].decode()})
+                        # print("SOME ff")
+                    # else:
+                    #     print("NONE FOUND!!!")
+                else:
+                    # print(attribute_type(attribute_list[idx].decode()))
+                    row.update({attribute_name : attribute_type(attribute_list[idx].decode())})
             if add_id_field_to_body:
                 row.update({self.id_field_name: identifier})
+
+            # print(row)
             bulk_contents.append(row)
 
+        # self.logger.info("Has attributes: %s, bulk contents: %s", self.has_attributes, bulk_contents)
         actions[1::2] = bulk_contents
-        self.logger.info("With Attributes called.")
+        # self.logger.info("With Attributes called.")
         # self.logger.info("Actions: %s", actions)
         return actions
 
@@ -1381,7 +1399,6 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
         Returns:
             An array of transformed vectors in bulk format.
         """
-
         if not self.is_nested and not self.has_attributes:
             return self.bulk_transform_non_nested(partition, action)
 
