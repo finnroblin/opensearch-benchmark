@@ -10,7 +10,9 @@ def parse_string_parameter(key: str, params: dict, default: str = None) -> str:
     if key not in params or not params[key]:
         if default is not None:
             return default
-        raise ConfigurationError("Value cannot be None for param {}".format(key))
+        raise ConfigurationError(
+            "Value cannot be None for param {}".format(key)
+        )
 
     if isinstance(params[key], str):
         return params[key]
@@ -22,7 +24,9 @@ def parse_int_parameter(key: str, params: dict, default: int = None) -> int:
     if key not in params:
         if default is not None:
             return default
-        raise ConfigurationError("Value cannot be None for param {}".format(key))
+        raise ConfigurationError(
+            "Value cannot be None for param {}".format(key)
+        )
 
     if isinstance(params[key], int):
         return params[key]
@@ -34,7 +38,9 @@ def parse_float_parameter(key: str, params: dict, default: float = None) -> floa
     if key not in params:
         if default:
             return default
-        raise ConfigurationError("Value cannot be None for param {}".format(key))
+        raise ConfigurationError(
+            "Value cannot be None for param {}".format(key)
+        )
 
     if isinstance(params[key], float):
         return params[key]
@@ -46,7 +52,9 @@ def parse_bool_parameter(key: str, params: dict, default: bool = None) -> bool:
     if key not in params:
         if default is not None:
             return default
-        raise ConfigurationError("Value cannot be None for param {}".format(key))
+        raise ConfigurationError(
+            "Value cannot be None for param {}".format(key)
+        )
 
     if isinstance(params[key], bool):
         return params[key]
