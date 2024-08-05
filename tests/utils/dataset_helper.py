@@ -11,13 +11,18 @@ from abc import ABC, abstractmethod
 import h5py
 import numpy as np
 
-from osbenchmark.utils.dataset import Context, BigANNVectorDataSet, HDF5DataSet, BigANNGroundTruthDataSet
+from osbenchmark.utils.dataset import (
+    Context,
+    BigANNVectorDataSet,
+    HDF5DataSet,
+    BigANNGroundTruthDataSet,
+)
 
 DEFAULT_RANDOM_STRING_LENGTH = 8
 
 
 class DataSetBuildContext:
-    """ Data class capturing information needed to build a particular data set
+    """Data class capturing information needed to build a particular data set
 
     Attributes:
         data_set_context: Indicator of what the data set is used for,
@@ -41,7 +46,7 @@ class DataSetBuildContext:
 
 
 class DataSetBuilder(ABC):
-    """ Abstract builder used to create a build a collection of data sets
+    """Abstract builder used to create a build a collection of data sets
 
     Attributes:
         data_set_build_contexts: list of data set build contexts that builder
@@ -52,7 +57,7 @@ class DataSetBuilder(ABC):
         self.data_set_build_contexts = list()
 
     def add_data_set_build_context(self, data_set_build_context: DataSetBuildContext):
-        """ Adds a data set build context to list of contexts to be built.
+        """Adds a data set build context to list of contexts to be built.
 
         Args:
             data_set_build_context: DataSetBuildContext to be added to list
@@ -65,14 +70,13 @@ class DataSetBuilder(ABC):
         return self
 
     def build(self):
-        """ Builds and serializes all data sets build contexts
-        """
+        """Builds and serializes all data sets build contexts"""
         for data_set_build_context in self.data_set_build_contexts:
             self._build_data_set(data_set_build_context)
 
     @abstractmethod
     def _build_data_set(self, context: DataSetBuildContext):
-        """ Builds an individual data set
+        """Builds an individual data set
 
         Args:
             context: DataSetBuildContext of data set to be built
@@ -80,7 +84,7 @@ class DataSetBuilder(ABC):
 
     @abstractmethod
     def _validate_data_set_context(self, context: DataSetBuildContext):
-        """ Validates that data set context can be added to this builder
+        """Validates that data set context can be added to this builder
 
         Args:
             context: DataSetBuildContext to be validated
@@ -95,22 +99,19 @@ class HDF5Builder(DataSetBuilder):
 
     def _validate_data_set_context(self, context: DataSetBuildContext):
         if context.path not in self.data_set_meta_data.keys():
-            self.data_set_meta_data[context.path] = {
-                context.data_set_context: context
-            }
+            self.data_set_meta_data[context.path] = {context.data_set_context: context}
             return
 
-        if context.data_set_context in \
-                self.data_set_meta_data[context.path].keys():
-            raise IllegalDataSetBuildContext("Path and context for data set "
-                                             "are already present in builder.")
+        if context.data_set_context in self.data_set_meta_data[context.path].keys():
+            raise IllegalDataSetBuildContext(
+                "Path and context for data set " "are already present in builder."
+            )
 
-        self.data_set_meta_data[context.path][context.data_set_context] = \
-            context
+        self.data_set_meta_data[context.path][context.data_set_context] = context
 
     @staticmethod
     def _validate_extension(context: DataSetBuildContext):
-        ext = context.path.split('.')[-1]
+        ext = context.path.split(".")[-1]
 
         if ext != HDF5DataSet.FORMAT_NAME:
             raise IllegalDataSetBuildContext("Invalid file extension")
@@ -119,10 +120,10 @@ class HDF5Builder(DataSetBuilder):
         # For HDF5, because multiple data sets can be grouped in the same file,
         # we will build data sets in memory and not write to disk until
         # _flush_data_sets_to_disk is called
-        with h5py.File(context.path, 'a') as hf:
+        with h5py.File(context.path, "a") as hf:
             hf.create_dataset(
                 HDF5DataSet.parse_context(context.data_set_context),
-                data=context.vectors
+                data=context.vectors,
             )
 
 
@@ -134,32 +135,44 @@ class BigANNVectorBuilder(DataSetBuilder):
         # prevent the duplication of paths for data sets
         data_set_paths = [c.path for c in self.data_set_build_contexts]
         if any(data_set_paths.count(x) > 1 for x in data_set_paths):
-            raise IllegalDataSetBuildContext("Build context paths have to be "
-                                             "unique.")
+            raise IllegalDataSetBuildContext(
+                "Build context paths have to be " "unique."
+            )
 
     @staticmethod
     def _validate_extension(context: DataSetBuildContext):
-        ext = context.path.split('.')[-1]
+        ext = context.path.split(".")[-1]
 
-        if ext not in [BigANNVectorDataSet.U8BIN_EXTENSION, BigANNVectorDataSet.FBIN_EXTENSION]:
+        if ext not in [
+            BigANNVectorDataSet.U8BIN_EXTENSION,
+            BigANNVectorDataSet.FBIN_EXTENSION,
+        ]:
             raise IllegalDataSetBuildContext("Invalid file extension: {}".format(ext))
 
-        if ext == BigANNVectorDataSet.U8BIN_EXTENSION and context.get_type() != \
-                np.uint8:
-            raise IllegalDataSetBuildContext("Invalid data type for {} ext."
-                                             .format(BigANNVectorDataSet
-                                                     .U8BIN_EXTENSION))
+        if (
+            ext == BigANNVectorDataSet.U8BIN_EXTENSION
+            and context.get_type() != np.uint8
+        ):
+            raise IllegalDataSetBuildContext(
+                "Invalid data type for {} ext.".format(
+                    BigANNVectorDataSet.U8BIN_EXTENSION
+                )
+            )
 
-        if ext == BigANNVectorDataSet.FBIN_EXTENSION and context.get_type() != \
-                np.float32:
-            raise IllegalDataSetBuildContext("Invalid data type for {} ext."
-                                             .format(BigANNVectorDataSet
-                                                     .FBIN_EXTENSION))
+        if (
+            ext == BigANNVectorDataSet.FBIN_EXTENSION
+            and context.get_type() != np.float32
+        ):
+            raise IllegalDataSetBuildContext(
+                "Invalid data type for {} ext.".format(
+                    BigANNVectorDataSet.FBIN_EXTENSION
+                )
+            )
 
     def _build_data_set(self, context: DataSetBuildContext):
         num_vectors = context.get_num_rows()
         dimension = context.get_row_length()
-        with open(context.path, 'wb') as f:
+        with open(context.path, "wb") as f:
             f.write(int.to_bytes(num_vectors, 4, "little"))
             f.write(int.to_bytes(dimension, 4, "little"))
             context.vectors.tofile(f)
@@ -169,20 +182,22 @@ class BigANNGroundTruthBuilder(BigANNVectorBuilder):
 
     @staticmethod
     def _validate_extension(context: DataSetBuildContext):
-        ext = context.path.split('.')[-1]
+        ext = context.path.split(".")[-1]
 
         if ext not in [BigANNGroundTruthDataSet.BIN_EXTENSION]:
             raise IllegalDataSetBuildContext("Invalid file extension: {}".format(ext))
 
         if context.get_type() != np.float32:
-            raise IllegalDataSetBuildContext("Invalid data type for {} ext."
-                                             .format(BigANNGroundTruthDataSet
-                                                     .BIN_EXTENSION))
+            raise IllegalDataSetBuildContext(
+                "Invalid data type for {} ext.".format(
+                    BigANNGroundTruthDataSet.BIN_EXTENSION
+                )
+            )
 
     def _build_data_set(self, context: DataSetBuildContext):
         num_queries = context.get_num_rows()
         k = context.get_row_length()
-        with open(context.path, 'wb') as f:
+        with open(context.path, "wb") as f:
             # Writing number of queries
             f.write(int.to_bytes(num_queries, 4, "little"))
             # Writing number of neighbors in a query
@@ -196,23 +211,24 @@ class BigANNGroundTruthBuilder(BigANNVectorBuilder):
 
 def create_attributes(num_vectors: int) -> np.ndarray:
     rng = np.random.default_rng()
-    
+
     # Random strings and None
-    strings = ['str1', 'str2', 'str3', None]
-    
+    strings = ["str1", "str2", "str3", None]
+
     # First column: random choice from strings
-    col1 = rng.choice(strings, num_vectors).astype('S10')
-    
+    col1 = rng.choice(strings, num_vectors).astype("S10")
+
     # Second column: random choice from strings
-    col2 = rng.choice(strings, num_vectors).astype('S10')
-    
+    col2 = rng.choice(strings, num_vectors).astype("S10")
+
     # Third column: random numbers between 0 and 100
-    col3 = rng.integers(0, 101, num_vectors).astype('S10')
-    
+    col3 = rng.integers(0, 101, num_vectors).astype("S10")
+
     # Combine columns into a single array
     random_vector = np.column_stack((col1, col2, col3))
-    
+
     return random_vector
+
 
 def create_random_2d_array(num_vectors: int, dimension: int) -> np.ndarray:
     rng = np.random.default_rng()
@@ -227,29 +243,30 @@ class IllegalDataSetBuildContext(Exception):
     """
 
     def __init__(self, message: str):
-        self.message = f'{message}'
+        self.message = f"{message}"
         super().__init__(self.message)
 
 
 def create_data_set(
-        num_vectors: int,
-        dimension: int,
-        extension: str,
-        data_set_context: Context,
-        data_set_dir,
-        file_path: str = None
+    num_vectors: int,
+    dimension: int,
+    extension: str,
+    data_set_context: Context,
+    data_set_dir,
+    file_path: str = None,
 ) -> str:
     if file_path:
         data_set_path = file_path
     else:
-        file_name_base = ''.join(random.choice(string.ascii_letters) for _ in
-                                 range(DEFAULT_RANDOM_STRING_LENGTH))
+        file_name_base = "".join(
+            random.choice(string.ascii_letters)
+            for _ in range(DEFAULT_RANDOM_STRING_LENGTH)
+        )
         data_set_file_name = "{}.{}".format(file_name_base, extension)
         data_set_path = os.path.join(data_set_dir, data_set_file_name)
     context = DataSetBuildContext(
-        data_set_context,
-        create_random_2d_array(num_vectors, dimension),
-        data_set_path)
+        data_set_context, create_random_2d_array(num_vectors, dimension), data_set_path
+    )
 
     if extension == HDF5DataSet.FORMAT_NAME:
         HDF5Builder().add_data_set_build_context(context).build()
@@ -259,52 +276,27 @@ def create_data_set(
     return data_set_path
 
 
-def create_parent_data_set(
-        num_vectors: int,
-        dimension: int,
-        extension: str,
-        data_set_context: Context,
-        data_set_dir,
-        file_path: str = None
-) -> str:
-    if file_path:
-        data_set_path = file_path
-    else:
-        file_name_base = ''.join(random.choice(string.ascii_letters) for _ in
-                                 range(DEFAULT_RANDOM_STRING_LENGTH))
-        data_set_file_name = "{}.{}".format(file_name_base, extension)
-        data_set_path = os.path.join(data_set_dir, data_set_file_name)
-    context = DataSetBuildContext(
-        data_set_context,
-        create_parent_ids(num_vectors),
-        data_set_path)
-
-    if extension == HDF5DataSet.FORMAT_NAME:
-        HDF5Builder().add_data_set_build_context(context).build()
-    else:
-        BigANNVectorBuilder().add_data_set_build_context(context).build()
-
-    return data_set_path
 
 def create_attributes_data_set(
-        num_vectors: int,
-        dimension: int,
-        extension: str,
-        data_set_context: Context,
-        data_set_dir,
-        file_path: str = None
+    num_vectors: int,
+    dimension: int,
+    extension: str,
+    data_set_context: Context,
+    data_set_dir,
+    file_path: str = None,
 ) -> str:
     if file_path:
         data_set_path = file_path
     else:
-        file_name_base = ''.join(random.choice(string.ascii_letters) for _ in
-                                 range(DEFAULT_RANDOM_STRING_LENGTH))
+        file_name_base = "".join(
+            random.choice(string.ascii_letters)
+            for _ in range(DEFAULT_RANDOM_STRING_LENGTH)
+        )
         data_set_file_name = "{}.{}".format(file_name_base, extension)
         data_set_path = os.path.join(data_set_dir, data_set_file_name)
     context = DataSetBuildContext(
-        data_set_context,
-        create_attributes(num_vectors),
-        data_set_path)
+        data_set_context, create_attributes(num_vectors), data_set_path
+    )
 
     if extension == HDF5DataSet.FORMAT_NAME:
         HDF5Builder().add_data_set_build_context(context).build()
@@ -315,24 +307,25 @@ def create_attributes_data_set(
 
 
 def create_ground_truth(
-        num_queries: int,
-        k: int,
-        extension: str,
-        data_set_context: Context,
-        data_set_dir,
-        file_path: str = None
+    num_queries: int,
+    k: int,
+    extension: str,
+    data_set_context: Context,
+    data_set_dir,
+    file_path: str = None,
 ) -> str:
     if file_path:
         data_set_path = file_path
     else:
-        file_name_base = ''.join(random.choice(string.ascii_letters) for _ in
-                                 range(DEFAULT_RANDOM_STRING_LENGTH))
+        file_name_base = "".join(
+            random.choice(string.ascii_letters)
+            for _ in range(DEFAULT_RANDOM_STRING_LENGTH)
+        )
         data_set_file_name = "{}.{}".format(file_name_base, extension)
         data_set_path = os.path.join(data_set_dir, data_set_file_name)
     context = DataSetBuildContext(
-        data_set_context,
-        create_random_2d_array(num_queries, k),
-        data_set_path)
+        data_set_context, create_random_2d_array(num_queries, k), data_set_path
+    )
 
     BigANNGroundTruthBuilder().add_data_set_build_context(context).build()
     return data_set_path

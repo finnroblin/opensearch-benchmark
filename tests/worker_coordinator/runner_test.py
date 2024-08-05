@@ -3259,7 +3259,8 @@ class VectorSearchQueryRunnerTests(TestCase):
     @mock.patch('osbenchmark.client.RequestContextHolder.on_client_request_start')
     @mock.patch("opensearchpy.OpenSearch")
     @run_async
-    async def test_calculate_recall_with_intermediate_negative_one_neighbors(self, opensearch, on_client_request_start, on_client_request_end):
+    async def test_calculate_recall_with_intermediate_negative_one_neighbors(self, opensearch,
+                                                                             on_client_request_start, on_client_request_end):
         search_response = {
             "timed_out": False,
             "took": 5,

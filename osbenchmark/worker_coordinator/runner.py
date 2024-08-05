@@ -1253,7 +1253,7 @@ class Query(Runner):
                 if "_source" in content:  # if source is not disabled, retrieve value from source
                     return _get_field_value(content["_source"], field_name)
                 return None
-            
+
             def binary_search_for_last_negative_1(neighbors):
                 low = 0
                 high = len(neighbors)
@@ -1282,27 +1282,19 @@ class Query(Runner):
                     self.logger.info("No neighbors are provided for recall calculation")
                     return 0.0
                 min_num_of_results = min(top_k, len(neighbors))
-                # print("neighbors type: ", type(neighbors))
-                # print("type of single neighbor: ", type(neighbors[min_num_of_results-1]))
                 last_neighbor_is_negative_1 = int(neighbors[min_num_of_results-1]) == -1
-                self.logger.info("Last neighbor is -1 is: %s with the actual last value being %s", last_neighbor_is_negative_1, neighbors[min_num_of_results-1])
                 truth_set = neighbors[:min_num_of_results]
                 if last_neighbor_is_negative_1:
                     self.logger.info("Last neighbor is -1")
                     last_neighbor_idx = binary_search_for_last_negative_1(truth_set)
-                    truth_set = truth_set[:last_neighbor_idx]
-                    # as_set = set(truth_set)
-                    # as_set.discard("-1")
-                    # truth_set = list(as_set)
 
-                    if len(truth_set) == 0:
+                    # Note: we do - 1 since list indexing is inclusive, and we want to ignore the first '-1' in neighbors.
+                    truth_set = truth_set[:last_neighbor_idx-1]
+                    if not truth_set:
                         self.logger.info("No true neighbors after filtering, returning recall = 1.\n"
                                          "Total neighbors in prediction: [%d].", len(predictions))
                         return 1.0
 
-                    self.logger.info("Truth set: %s ", truth_set)
-                # else:
-                
 
                 for j in range(min_num_of_results):
                     if j >= len(predictions):
@@ -1312,8 +1304,8 @@ class Query(Runner):
                         break
                     if predictions[j] in truth_set:
                         correct += 1.0
-                self.logger.info("Number correct: %s, length of truth set: %s, truth_set: %s", correct, len(truth_set), truth_set)
-                return correct / len(truth_set) # TP / (TP + FN), but ground truth includes all TP and FN. 
+
+                return correct / len(truth_set)
 
             def calculate_radial_search_recall(predictions, neighbors, enable_top_1_recall=False):
                 """
@@ -1396,7 +1388,6 @@ class Query(Runner):
 
             recall_processing_start = time.perf_counter()
             response_json = json.loads(response.getvalue())
-            self.logger.info("Response json %s", response_json)
             if _is_empty_search_results(response_json):
                 self.logger.info("Vector search query returned no results.")
                 return result
@@ -1614,7 +1605,6 @@ class CreateIndex(Runner):
         indices = mandatory(params, "indices", self)
         api_params = self._default_kw_params(params)
         ## ignore invalid entries rather than erroring
-        logging.getLogger(__name__).info("Params in index creation: %s", params)
         for term in ["index", "body"]:
             api_params.pop(term, None)
         for index, body in indices:
