@@ -1133,12 +1133,7 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         self.logger.info("Efficient filter: %s", efficient_filter)
         
         # override query params with vector search query
-        body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_query_body(vector, efficient_filter, 
-                                                                                   filter_type=filter_type, filter_body=filter_body)
-        
-        if filter_type == "post_filter":
-            body_params["post_filter"] = filter_body
-        # if I pass in a dictionary does it change via side effects?
+        body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_query_body(vector, efficient_filter)
 
         self.logger.info("Note: returning as vector search query: %s", body_params)
 
@@ -1274,7 +1269,7 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
         self.id_field_name: str = parse_string_parameter(
             self.PARAMS_NAME_ID_FIELD_NAME, params, self.DEFAULT_ID_FIELD_NAME
         )
-        self.has_attributes : bool = parse_bool_parameter("has_attributes", params, False)
+        self.has_attributes = parse_int_parameter("has_attributes", params, 0)
 
         self.action_buffer = None
         self.num_nested_vectors = 10
@@ -1310,18 +1305,15 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
             partition.parent_data_set.seek(partition.offset)
 
         if self.has_attributes:
-            self.logger.info("Trying to read attributes dataset")
             partition.attributes_data_set = get_data_set(
                 self.parent_data_set_format, self.parent_data_set_path, Context.ATTRIBUTES
             )
-            # self.logger.info("Attributes dataset: %s", partition.attributes_data_set)
-            # self.logger.info("Here is the first entry: %s", partition.attributes_data_set.read(0))
             partition.attributes_data_set.seek(partition.offset)
 
         return partition
     
     def bulk_transform_add_attributes(self, partition: np.ndarray, action, attributes: np.ndarray) ->   List[Dict[str, Any]]:
-        """attributes is a (partition_len x 4) matrix. """
+        """attributes is a (partition_len x 3) matrix. """
         actions = []
 
         _ = [
@@ -1335,28 +1327,15 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
             partition.tolist(), attributes.tolist(), range(self.current, self.current + len(partition))
         ):
             row = {self.field_name: vec}
-            
-            for idx, attribute_name, attribute_type in zip(range(3), ["color", "taste", "age"], [str, str, int]):
-            # for idx, attribute_name, attribute_type in zip(range(3), ["taste", "color", "age"], [str, str, int]):
-                if attribute_type == str:
-                    if attribute_list[idx].decode() != "None":
-                        row.update({attribute_name : attribute_list[idx].decode()})
-                        # print("SOME ff")
-                    # else:
-                    #     print("NONE FOUND!!!")
-                else:
-                    # print(attribute_type(attribute_list[idx].decode()))
-                    row.update({attribute_name : attribute_type(attribute_list[idx].decode())})
+            for idx, attribute_name, attribute_type in zip(range(3), ["taste", "color", "age"], [str, str, int]):
+                row.update({attribute_name : attribute_type(attribute_list[idx])})
             if add_id_field_to_body:
                 row.update({self.id_field_name: identifier})
-
-            # print(row)
             bulk_contents.append(row)
 
-        # self.logger.info("Has attributes: %s, bulk contents: %s", self.has_attributes, bulk_contents)
         actions[1::2] = bulk_contents
-        # self.logger.info("With Attributes called.")
-        # self.logger.info("Actions: %s", actions)
+
+        self.logger.info("Actions: %s", actions)
         return actions
 
 
@@ -1399,6 +1378,7 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
         Returns:
             An array of transformed vectors in bulk format.
         """
+
         if not self.is_nested and not self.has_attributes:
             return self.bulk_transform_non_nested(partition, action)
 
