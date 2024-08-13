@@ -1041,8 +1041,6 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         request-params: query parameters that can be passed to search request
     """
     PARAMS_NAME_K = "k"
-    PARAMS_NAME_MAX_DISTANCE = "max_distance"
-    PARAMS_NAME_MIN_SCORE = "min_score"
     PARAMS_NAME_BODY = "body"
     PARAMS_NAME_SIZE = "size"
     PARAMS_NAME_QUERY = "query"
@@ -1059,27 +1057,11 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
     PARAMS_NAME_REQUEST_PARAMS = "request-params"
     PARAMS_NAME_SOURCE = "_source"
     PARAMS_NAME_ALLOW_PARTIAL_RESULTS = "allow_partial_search_results"
-    MIN_SCORE_QUERY_TYPE = "min_score"
-    MAX_DISTANCE_QUERY_TYPE = "max_distance"
-    KNN_QUERY_TYPE = "knn"
-    DEFAULT_RADIAL_SEARCH_QUERY_RESULT_SIZE = 10000
 
     def __init__(self, workloads, params, query_params, **kwargs):
         super().__init__(workloads, params, Context.QUERY, **kwargs)
         self.logger = logging.getLogger(__name__)
-        self.k = None
-        self.distance = None
-        self.score = None
-        if self.PARAMS_NAME_K in params:
-            self.k = parse_int_parameter(self.PARAMS_NAME_K, params)
-            self.query_type = self.KNN_QUERY_TYPE
-        if self.PARAMS_NAME_MAX_DISTANCE in params:
-            self.distance = parse_float_parameter(self.PARAMS_NAME_MAX_DISTANCE, params)
-            self.query_type = self.MAX_DISTANCE_QUERY_TYPE
-        if self.PARAMS_NAME_MIN_SCORE in params:
-            self.score = parse_float_parameter(self.PARAMS_NAME_MIN_SCORE, params)
-            self.query_type = self.MIN_SCORE_QUERY_TYPE
-        self._validate_query_type_parameters()
+        self.k = parse_int_parameter(self.PARAMS_NAME_K, params)
         self.repetitions = parse_int_parameter(self.PARAMS_NAME_REPETITIONS, params, 1)
         self.current_rep = 1
         self.neighbors_data_set_format = parse_string_parameter(
@@ -1092,6 +1074,7 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
                                                 self.PARAMS_VALUE_VECTOR_SEARCH)
         self.query_params = query_params
         self.query_params.update({
+            self.PARAMS_NAME_K: self.k,
             self.PARAMS_NAME_OPERATION_TYPE: operation_type,
             self.PARAMS_NAME_ID_FIELD_NAME: params.get(self.PARAMS_NAME_ID_FIELD_NAME),
         })
@@ -1120,10 +1103,6 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
             neighbors_corpora = self.extract_corpora(self.neighbors_data_set_corpus, self.neighbors_data_set_format)
             self.corpora.extend(corpora for corpora in neighbors_corpora if corpora not in self.corpora)
 
-    def _validate_query_type_parameters(self):
-        if bool(self.k) + bool(self.distance) + bool(self.score) > 1:
-            raise ValueError("Only one of k, max_distance, or min_score can be specified in vector search.")
-
     @staticmethod
     def _validate_neighbors_data_set(file_path, corpus):
         if file_path and corpus:
@@ -1138,25 +1117,11 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
             self.PARAMS_NAME_ALLOW_PARTIAL_RESULTS, "false")
         self.query_params.update({self.PARAMS_NAME_REQUEST_PARAMS: request_params})
 
-    def _get_query_neighbors(self):
-        if self.query_type == self.KNN_QUERY_TYPE:
-            return Context.NEIGHBORS
-        if self.query_type == self.MIN_SCORE_QUERY_TYPE:
-            return Context.MIN_SCORE_NEIGHBORS
-        if self.query_type == self.MAX_DISTANCE_QUERY_TYPE:
-            return Context.MAX_DISTANCE_NEIGHBORS
-        raise Exception("Unknown query type [%s]" % self.query_type)
-
-    def _get_query_size(self):
-        if self.query_type == self.KNN_QUERY_TYPE:
-            return self.k
-        return self.DEFAULT_RADIAL_SEARCH_QUERY_RESULT_SIZE
-
     def _update_body_params(self, vector):
         # accept body params if passed from workload, else, create empty dictionary
         body_params = self.query_params.get(self.PARAMS_NAME_BODY) or dict()
         if self.PARAMS_NAME_SIZE not in body_params:
-            body_params[self.PARAMS_NAME_SIZE] = self._get_query_size()
+            body_params[self.PARAMS_NAME_SIZE] = self.k
         if self.PARAMS_NAME_QUERY in body_params:
             self.logger.warning(
                 "[%s] param from body will be replaced with vector search query.", self.PARAMS_NAME_QUERY)
@@ -1190,7 +1155,7 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
             self.neighbors_data_set_path = self.data_set_path
         # add neighbor instance to partition
         partition.neighbors_data_set = get_data_set(
-            self.neighbors_data_set_format, self.neighbors_data_set_path, self._get_query_neighbors())
+            self.neighbors_data_set_format, self.neighbors_data_set_path, Context.NEIGHBORS)
         partition.neighbors_data_set.seek(partition.offset)
         return partition
 
@@ -1209,7 +1174,7 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
             raise StopIteration
         vector = self.data_set.read(1)[0]
         neighbor = self.neighbors_data_set.read(1)[0]
-        true_neighbors = list(map(str, neighbor[:self.k] if self.k else neighbor))
+        true_neighbors = list(map(str, neighbor[:self.k]))
         self.query_params.update({
             "neighbors": true_neighbors,
         })
@@ -1224,30 +1189,13 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         neighbor search against a k-NN plugin index
         Args:
             vector: vector used for query
-            efficient_filter: efficient filter used for query
         Returns:
             A dictionary containing the body used for search query
         """
-        query = {}
-        if self.query_type == self.KNN_QUERY_TYPE:
-            query.update({
-                "k": self.k,
-            })
-        elif self.query_type == self.MIN_SCORE_QUERY_TYPE:
-            query.update({
-                "min_score": self.score,
-            })
-        elif self.query_type == self.MAX_DISTANCE_QUERY_TYPE:
-            query.update({
-                "max_distance": self.distance,
-            })
-        else:
-            raise Exception("Unknown query type [%s]" % self.query_type)
-
-        query.update({
+        query = {
             "vector": vector,
-        })
-
+            "k": self.k,
+        }
         if efficient_filter:
             query.update({
                 "filter": efficient_filter,
