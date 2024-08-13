@@ -189,7 +189,7 @@ class SummaryResultsPublisher:
             self.publish_operational_statistics(metrics_table=metrics_table, warnings=warnings, record=record_with_best_throughput,
                                                 task=record_with_best_throughput["task"])
             metrics_table.extend(self._publish_best_client_settings(record_with_best_throughput, record_with_best_throughput["task"]))
-
+        logging.getLogger(__name__).info("Correctness metrics: %s", stats.correctness_metrics)
         for record in stats.correctness_metrics:
             task = record["task"]
 

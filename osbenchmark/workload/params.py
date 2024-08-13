@@ -1327,6 +1327,7 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
             self.PARAMS_NAME_ID_FIELD_NAME, params, self.DEFAULT_ID_FIELD_NAME
         )
         self.has_attributes : bool = parse_bool_parameter("has_attributes", params, False)
+        self.filter_attributes: List[Any] = params.get("filter_attributes", [])
 
         self.action_buffer = None
         self.num_nested_vectors = 10
@@ -1360,8 +1361,8 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
                 self.parent_data_set_format, self.parent_data_set_path, Context.PARENTS
             )
             partition.parent_data_set.seek(partition.offset)
-
-        if self.has_attributes:
+        # if self.has_attributes
+        if self.filter_attributes:
             self.logger.info("Trying to read attributes dataset")
             partition.attributes_data_set = get_data_set(
                 self.parent_data_set_format, self.parent_data_set_path, Context.ATTRIBUTES
@@ -1387,18 +1388,24 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
             partition.tolist(), attributes.tolist(), range(self.current, self.current + len(partition))
         ):
             row = {self.field_name: vec}
-            
-            for idx, attribute_name, attribute_type in zip(range(3), ["color", "taste", "age"], [str, str, int]):
-            # for idx, attribute_name, attribute_type in zip(range(3), ["taste", "color", "age"], [str, str, int]):
-                if attribute_type == str:
-                    if attribute_list[idx].decode() != "None":
-                        row.update({attribute_name : attribute_list[idx].decode()})
+            for idx, attribute_name in zip(range(len(self.filter_attributes)), self.filter_attributes):
+                if attribute_list[idx].decode() != "None":
+                    row.update({attribute_name : attribute_list[idx].decode()})
                         # print("SOME ff")
                     # else:
                     #     print("NONE FOUND!!!")
-                else:
-                    # print(attribute_type(attribute_list[idx].decode()))
-                    row.update({attribute_name : attribute_type(attribute_list[idx].decode())})
+                
+            # for idx, attribute_name, attribute_type in zip(range(3), ["color", "taste", "age"], [str, str, int]):
+            # # for idx, attribute_name, attribute_type in zip(range(3), ["taste", "color", "age"], [str, str, int]):
+            #     if attribute_type == str:
+            #         if attribute_list[idx].decode() != "None":
+            #             row.update({attribute_name : attribute_list[idx].decode()})
+            #             # print("SOME ff")
+            #         # else:
+            #         #     print("NONE FOUND!!!")
+            #     else:
+            #         # print(attribute_type(attribute_list[idx].decode()))
+            #         row.update({attribute_name : attribute_type(attribute_list[idx].decode())})
             if add_id_field_to_body:
                 row.update({self.id_field_name: identifier})
 
@@ -1539,7 +1546,8 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
         else:
             parent_ids = None
 
-        if self.has_attributes:
+        # if self.has_attributes:
+        if self.filter_attributes:
             attributes = self.attributes_data_set.read(bulk_size)
         else:
             attributes = None
