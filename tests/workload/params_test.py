@@ -2900,62 +2900,6 @@ class VectorSearchPartitionPartitionParamSourceTestCase(TestCase):
         with self.assertRaises(StopIteration):
             query_param_source_partition.params()
 
-    def test_params_custom_body(self):
-        # Create a data set
-        k = 12
-        data_set_path = create_data_set(
-            self.DEFAULT_NUM_VECTORS,
-            self.DEFAULT_DIMENSION,
-            self.DEFAULT_TYPE,
-            Context.QUERY,
-            self.data_set_dir
-        )
-        neighbors_data_set_path = create_data_set(
-            self.DEFAULT_NUM_VECTORS,
-            self.DEFAULT_DIMENSION,
-            self.DEFAULT_TYPE,
-            Context.NEIGHBORS,
-            self.data_set_dir
-        )
-        filter_body = {
-            "key": "value"
-        }
-
-        # Create a QueryVectorsFromDataSetParamSource with relevant params
-        test_param_source_params = {
-            "field": self.DEFAULT_FIELD_NAME,
-            "data_set_format": self.DEFAULT_TYPE,
-            "data_set_path": data_set_path,
-            "neighbors_data_set_path": neighbors_data_set_path,
-            "k": k,
-            "filter": filter_body,
-        }
-        query_param_source = VectorSearchPartitionParamSource(
-            workload.Workload(name="unit-test"),
-            test_param_source_params, {
-                "index": self.DEFAULT_INDEX_NAME,
-                "request-params": {},
-                "body": {
-                    "size": 100,
-                }
-            }
-        )
-        query_param_source_partition = query_param_source.partition(0, 1)
-
-        # Check each
-        for _ in range(DEFAULT_NUM_VECTORS):
-            self._check_params(
-                query_param_source_partition.params(),
-                self.DEFAULT_FIELD_NAME,
-                self.DEFAULT_DIMENSION,
-                k,
-                100,
-                filter_body,
-            )
-
-        # Assert last call creates stop iteration
-        with self.assertRaises(StopIteration):
-            query_param_source_partition.params()
     def test_post_filter(self):
         # Create a data set
         k = 12
@@ -3434,7 +3378,7 @@ class BulkVectorsAttributeCase(TestCase):
             "data_set_path": data_set_path,
             "bulk_size": bulk_size,
             "id-field-name": self.DEFAULT_ID_FIELD_NAME,
-            "has_attributes": True
+            "filter_attributes": self.ATTRIBUTES_LIST
         }
         bulk_param_source = BulkVectorsFromDataSetParamSource(
             workload.Workload(name="unit-test"), test_param_source_params

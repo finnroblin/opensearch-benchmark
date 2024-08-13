@@ -40,7 +40,7 @@ import numpy as np
 from osbenchmark import exceptions
 from osbenchmark.utils import io
 from osbenchmark.utils.dataset import DataSet, get_data_set, Context
-from osbenchmark.utils.parse import parse_string_parameter, parse_int_parameter, parse_bool_parameter
+from osbenchmark.utils.parse import parse_string_parameter, parse_int_parameter
 from osbenchmark.workload import workload
 
 __PARAM_SOURCES_BY_OP = {}
@@ -1127,9 +1127,9 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
                 "[%s] param from body will be replaced with vector search query.", self.PARAMS_NAME_QUERY)
 
         self.logger.info("Here, we have query_params: %s ", self.query_params)
-        efficient_filter=self.query_params.get(self.PARAMS_NAME_FILTER)
         filter_type=self.query_params.get(self.PARAMS_NAME_FILTER_TYPE)
         filter_body=self.query_params.get(self.PARAMS_NAME_FILTER_BODY)
+        efficient_filter = filter_body if filter_type == "efficient" else None
 
         # override query params with vector search query
         body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_query_body(vector, efficient_filter, filter_type, filter_body)
@@ -1262,7 +1262,7 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
         self.id_field_name: str = parse_string_parameter(
             self.PARAMS_NAME_ID_FIELD_NAME, params, self.DEFAULT_ID_FIELD_NAME
         )
-        self.has_attributes = parse_bool_parameter("has_attributes", params, False)
+        self.filter_attributes: List[Any] = params.get("filter_attributes", [])
 
         self.action_buffer = None
         self.num_nested_vectors = 10
@@ -1294,7 +1294,7 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
             )
             partition.parent_data_set.seek(partition.offset)
 
-        if self.has_attributes:
+        if self.filter_attributes:
             partition.attributes_data_set = get_data_set(
                 self.parent_data_set_format, self.parent_data_set_path, Context.ATTRIBUTES
             )
@@ -1317,8 +1317,10 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
             partition.tolist(), attributes.tolist(), range(self.current, self.current + len(partition))
         ):
             row = {self.field_name: vec}
-            for idx, attribute_name, attribute_type in zip(range(3), ["taste", "color", "age"], [str, str, int]):
-                row.update({attribute_name : attribute_type(attribute_list[idx])})
+            for idx, attribute_name in zip(range(len(self.filter_attributes)), self.filter_attributes):
+                attribute = attribute_list[idx].decode()
+                if attribute != "None":
+                    row.update({attribute_name : attribute})
             if add_id_field_to_body:
                 row.update({self.id_field_name: identifier})
             bulk_contents.append(row)
@@ -1369,11 +1371,11 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
             An array of transformed vectors in bulk format.
         """
 
-        if not self.is_nested and not self.has_attributes:
+        if not self.is_nested and not self.filter_attributes:
             return self.bulk_transform_non_nested(partition, action)
 
         # TODO: Assumption: we won't add attributes if we're also doing a nested query.
-        if self.has_attributes:
+        if self.filter_attributes:
             return self.bulk_transform_add_attributes(partition, action, attributes)
         actions = []
 
@@ -1457,7 +1459,7 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
         else:
             parent_ids = None
 
-        if self.has_attributes:
+        if self.filter_attributes:
             attributes = self.attributes_data_set.read(bulk_size)
         else:
             attributes = None
