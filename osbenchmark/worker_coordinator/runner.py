@@ -515,7 +515,6 @@ class BulkIndex(Runner):
         if not detailed_results:
             opensearch.return_raw_response()
         request_context_holder.on_client_request_start()
-
         if with_action_metadata:
             api_kwargs.pop("index", None)
             # only half of the lines are documents
@@ -1271,6 +1270,7 @@ class Query(Runner):
                     return 0.0
                 min_num_of_results = min(top_k, len(neighbors))
                 truth_set = neighbors[:min_num_of_results]
+
                 for j in range(min_num_of_results):
                     if j >= len(predictions):
                         self.logger.info("No more neighbors in prediction to compare against ground truth.\n"
