@@ -1264,22 +1264,11 @@ class Query(Runner):
                 high = len(neighbors)
                 while low < high:
                     mid = (low + high) // 2
-                    if neighbors[mid] == -1:
+                    if int(neighbors[mid]) == -1:
                         high = mid
                     else:
                         low = mid + 1
-                return low - 1
-
-            def binary_search_for_last_negative_1(neighbors):
-                low = 0
-                high = len(neighbors)
-                while low < high:
-                    mid = (low + high) // 2
-                    if neighbors[mid] == "-1":
-                        high = mid
-                    else:
-                        low = mid + 1
-                return low - 1
+                return low
 
             def calculate_topk_search_recall(predictions, neighbors, top_k):
                 """
@@ -1323,35 +1312,6 @@ class Query(Runner):
 
                 return correct / len(truth_set)
 
-
-                    # if last_neighbor_idx == -1:
-                    #     self.logger.info("No true neighbors after filtering, returning recall = 1.\n"
-                    #                      "Total neighbors in prediction: [%d].", len(predictions))
-                    #     return 1.0
-                    # self.logger.info("fuck this bullshit, last_nghr_idx: %s", last_neighbor_idx)
-                    # truth_set = neighbors[:last_neighbor_idx+1]
-                    truth_set = list(as_set)
-
-                    if len(truth_set) == 0:
-                        self.logger.info("No true neighbors after filtering, returning recall = 1.\n"
-                                         "Total neighbors in prediction: [%d].", len(predictions))
-                        return 1.0
-
-                    self.logger.info("Truth set: %s ", truth_set)
-                # else:
-                
-
-                for j in range(min_num_of_results):
-                    if j >= len(predictions):
-                        self.logger.info("No more neighbors in prediction to compare against ground truth.\n"
-                                         "Total neighbors in prediction: [%d].\n"
-                                         "Total neighbors in ground truth: [%d]", len(predictions), min_num_of_results)
-                        break
-                    if predictions[j] in truth_set:
-                        correct += 1.0
-                self.logger.info("Number correct: %s, length of truth set: %s, truth_set: %s", correct, len(truth_set), truth_set)
-                return correct / len(truth_set) # TP / (TP + FN), but ground truth includes all TP and FN. 
-
             doc_type = params.get("type")
             response = await self._raw_search(opensearch, doc_type, index, body, request_params, headers=headers)
             recall_processing_start = time.perf_counter()
@@ -1383,10 +1343,10 @@ class Query(Runner):
                 candidates.append(field_value)
             neighbors_dataset = params["neighbors"]
             num_neighbors = params.get("k", 1)
-            recall_k = calculate_recall(candidates, neighbors_dataset, num_neighbors)
+            recall_k = calculate_topk_search_recall(candidates, neighbors_dataset, num_neighbors)
             result.update({"recall@k": recall_k})
 
-            recall_1 = calculate_recall(candidates, neighbors_dataset, 1)
+            recall_1 = calculate_topk_search_recall(candidates, neighbors_dataset, 1)
             result.update({"recall@1": recall_1})
 
             recall_processing_end = time.perf_counter()
