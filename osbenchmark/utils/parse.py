@@ -60,4 +60,3 @@ def parse_bool_parameter(key: str, params: dict, default: bool = None) -> bool:
         return params[key]
 
     raise ConfigurationError("Value must be a bool for param {}".format(key))
-
