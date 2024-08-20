@@ -880,11 +880,11 @@ class VectorDataSetPartitionParamSource(ParamSource):
         offset: Offset into the data set to start at. Relevant when there are
                 multiple partitions
     """
+    NESTED_FIELD_SEPARATOR = "."
 
     def __init__(self, workload, params, context: Context, **kwargs):
         super().__init__(workload, params, **kwargs)
         self.field_name: str = parse_string_parameter("field", params)
-        self.NESTED_FIELD_SEPARATOR = "."
         self.is_nested = self.NESTED_FIELD_SEPARATOR in self.field_name # in base class because used for both bulk ingest and queries.
         self.context = context
         self.data_set_format = parse_string_parameter("data_set_format", params)
@@ -1203,7 +1203,7 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         }
 
         if self.is_nested:
-            outer_field_name, _inner_field_name = self.get_split_fields()
+            outer_field_name, _ = self.get_split_fields()
             return {
                 "nested": {
                     "path": outer_field_name,
