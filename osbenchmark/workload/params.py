@@ -1070,6 +1070,8 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
     PARAMS_NAME_FILTER_TYPE = "filter_type"
     PARAMS_NAME_FILTER_BODY = "filter_body"
     PARAMS_NAME_REPETITIONS = "repetitions"
+    PARAMS_NAME_OVERSAMPLE_FACTOR = "oversample_factor"
+    PARAMS_NAME_RESCORE = "rescore"
     PARAMS_NAME_NEIGHBORS_DATA_SET_FORMAT = "neighbors_data_set_format"
     PARAMS_NAME_NEIGHBORS_DATA_SET_PATH = "neighbors_data_set_path"
     PARAMS_NAME_NEIGHBORS_DATA_SET_CORPUS = "neighbors_data_set_corpus"
@@ -1119,6 +1121,11 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
             self.query_params.update({
                 self.PARAMS_NAME_FILTER_BODY:  params.get(self.PARAMS_NAME_FILTER_BODY)
             })
+
+        if self.PARAMS_NAME_OVERSAMPLE_FACTOR in params:
+            self.query_params.update({
+                self.PARAMS_NAME_OVERSAMPLE_FACTOR : params.get(self.PARAMS_NAME_OVERSAMPLE_FACTOR)
+            })
         # if neighbors data set is defined as corpus, extract corresponding corpus from workload
         # and add it to corpora list
         if self.neighbors_data_set_corpus:
@@ -1147,13 +1154,12 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         filter_type=self.query_params.get(self.PARAMS_NAME_FILTER_TYPE)
         filter_body=self.query_params.get(self.PARAMS_NAME_FILTER_BODY)
         efficient_filter = filter_body if filter_type == "efficient" else None
-
+        oversample_factor = self.query_params.get(self.PARAMS_NAME_OVERSAMPLE_FACTOR)
         # override query params with vector search query
-        body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_query_body(vector, efficient_filter, filter_type, filter_body)
+        body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_query_body(vector, efficient_filter, filter_type, filter_body, oversample_factor)
 
         if filter_type == "post_filter":
             body_params["post_filter"] = filter_body
-
         self.query_params.update({self.PARAMS_NAME_BODY: body_params})
 
     def partition(self, partition_index, total_partitions):
@@ -1196,7 +1202,7 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         self.percent_completed = self.current / self.total
         return self.query_params
 
-    def _build_vector_search_query_body(self, vector, efficient_filter=None, filter_type=None, filter_body=None) -> dict:
+    def _build_vector_search_query_body(self, vector, efficient_filter=None, filter_type=None, filter_body=None, oversample_factor: float = None) -> dict:
         """Builds a k-NN request that can be used to execute an approximate nearest
         neighbor search against a k-NN plugin index
         Args:
@@ -1211,6 +1217,10 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         if efficient_filter:
             query.update({
                 "filter": efficient_filter,
+            })
+        if oversample_factor:
+            query.update({
+                self.PARAMS_NAME_RESCORE: {self.PARAMS_NAME_OVERSAMPLE_FACTOR: oversample_factor}
             })
 
         knn_search_query = {
